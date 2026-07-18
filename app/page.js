@@ -1,10 +1,51 @@
 "use client";
-import { useState } from "react";
+import { useState, useEffect, useCallback } from "react";
 
 export default function Home() {
   const [question, setQuestion] = useState("");
   const [state, setState] = useState("idle"); // idle | asking | done
   const [result, setResult] = useState(null);
+  const [billing, setBilling] = useState(null); // null while loading
+  const [purchaseNotice, setPurchaseNotice] = useState(null);
+  const [checkoutBusy, setCheckoutBusy] = useState(null); // tier key currently launching, or null
+
+  const fetchStatus = useCallback(async () => {
+    try {
+      const res = await fetch("/api/status");
+      const data = await res.json();
+      setBilling(data);
+      return data;
+    } catch {
+      return null;
+    }
+  }, []);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const purchase = params.get("purchase");
+    if (purchase) {
+      window.history.replaceState({}, "", "/");
+    }
+    if (purchase === "success") {
+      setPurchaseNotice("settling your purchase…");
+      pollAfterPurchase();
+    } else {
+      fetchStatus();
+    }
+
+    async function pollAfterPurchase() {
+      for (let i = 0; i < 6; i++) {
+        const data = await fetchStatus();
+        if (data && (data.packBalance > 0 || data.subscription?.active)) {
+          setPurchaseNotice(null);
+          return;
+        }
+        await new Promise((r) => setTimeout(r, 1500));
+      }
+      setPurchaseNotice(null);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   async function ask() {
     if (question.trim().length < 3 || state === "asking") return;
@@ -22,6 +63,36 @@ export default function Home() {
       setResult({ status: "error", message: "The oracle could not be reached." });
     }
     setState("done");
+    fetchStatus();
+  }
+
+  async function startCheckout(tierKey) {
+    setCheckoutBusy(tierKey);
+    try {
+      const res = await fetch("/api/checkout", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ tier: tierKey }),
+      });
+      const data = await res.json();
+      if (data.url) {
+        window.location.href = data.url;
+        return;
+      }
+    } catch {
+      // fall through to reset busy state below
+    }
+    setCheckoutBusy(null);
+  }
+
+  async function openPortal() {
+    try {
+      const res = await fetch("/api/portal", { method: "POST" });
+      const data = await res.json();
+      if (data.url) window.location.href = data.url;
+    } catch {
+      // no-op — the manage link just does nothing if the portal can't open
+    }
   }
 
   function reset() {
@@ -29,6 +100,9 @@ export default function Home() {
     setResult(null);
     setQuestion("");
   }
+
+  const restingUntilRenewal = billing?.subscription?.hardCapped === true;
+  const showPricing = billing && !billing.hasAccess && !restingUntilRenewal;
 
   return (
     <main className="wrap">
@@ -39,7 +113,20 @@ export default function Home() {
         <p className="tag">the odds, honestly</p>
       </header>
 
-      {state !== "done" && (
+      {purchaseNotice && <p className="purchasenotice">{purchaseNotice}</p>}
+
+      {state !== "done" && restingUntilRenewal && (
+        <section className="card silent">
+          <div className="silentmark">—</div>
+          <p className="silenttext">She rests until the turning of the month.</p>
+        </section>
+      )}
+
+      {state !== "done" && !restingUntilRenewal && showPricing && (
+        <Pricing tiers={billing.tiers} busy={checkoutBusy} onSelect={startCheckout} />
+      )}
+
+      {state !== "done" && !restingUntilRenewal && !showPricing && (
         <section className="asker">
           <p className="prompt">
             Ask about a relationship. Not <em>your</em> person — the oracle reads the
@@ -56,13 +143,22 @@ export default function Home() {
           <button className="cast" onClick={ask} disabled={state === "asking" || question.trim().length < 3}>
             {state === "asking" ? "reading the leaves…" : "cast"}
           </button>
+          <BillingLine billing={billing} onManage={openPortal} />
           <p className="fineprint">
             No account. No name. Questions are remembered; people are not.
           </p>
         </section>
       )}
 
-      {state === "done" && result && <Verdict result={result} onAgain={reset} />}
+      {state === "done" && result && (
+        <Verdict
+          result={result}
+          onAgain={reset}
+          tiers={billing?.tiers}
+          checkoutBusy={checkoutBusy}
+          onSelectTier={startCheckout}
+        />
+      )}
 
       <footer className="foot">
         A probabilistic reading, not advice. Not a wager.
@@ -71,10 +167,63 @@ export default function Home() {
   );
 }
 
-function Verdict({ result, onAgain }) {
+function BillingLine({ billing, onManage }) {
+  if (!billing) return null;
+  const sub = billing.subscription;
+  if (sub?.active) {
+    return (
+      <p className="balanceline">
+        subscribed — unlimited within fair use
+        <button className="managelink" onClick={onManage}>manage</button>
+      </p>
+    );
+  }
+  if (billing.packBalance > 0) {
+    return (
+      <p className="balanceline">
+        {billing.packBalance} verdict{billing.packBalance === 1 ? "" : "s"} remaining
+      </p>
+    );
+  }
+  if (billing.freeTasteAvailable) {
+    return <p className="balanceline">one free reading this week</p>;
+  }
+  return null;
+}
+
+function Pricing({ tiers, busy, onSelect }) {
+  if (!tiers) return null;
+  return (
+    <section className="pricing">
+      <p className="prompt">
+        Your free weekly reading is spent. Choose how you'd like to keep asking.
+      </p>
+      <div className="tiers">
+        {tiers.map((t) => (
+          <div className="tier" key={t.key}>
+            <div className="tiername">{t.name}</div>
+            <div className="tierprice">
+              ${(t.amount / 100).toFixed(2)}
+              {t.mode === "subscription" ? <span className="tierper">/mo</span> : null}
+            </div>
+            <div className="tierdesc">
+              {t.mode === "subscription" ? "unlimited within fair use" : `${t.verdicts} verdicts`}
+            </div>
+            <button className="tierbtn" disabled={busy === t.key} onClick={() => onSelect(t.key)}>
+              {busy === t.key ? "opening…" : "choose"}
+            </button>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function Verdict({ result, onAgain, tiers, checkoutBusy, onSelectTier }) {
   if (result.status === "spoken") {
     return (
       <section className="card spoken">
+        {result.softCapNotice && <p className="softcap">{result.softCapNotice}</p>}
         <div className="conf" data-c={result.confidence}>{confLabel(result.confidence)}</div>
         <h2 className="headline">{result.headline}</h2>
         <ul className="odds">
@@ -112,6 +261,24 @@ function Verdict({ result, onAgain }) {
       <section className="card wall">
         <p className="walltext">{result.message}</p>
         <button className="again" onClick={onAgain}>ask another</button>
+      </section>
+    );
+  }
+  if (result.status === "rested") {
+    return (
+      <section className="card silent">
+        <div className="silentmark">—</div>
+        <p className="silenttext">{result.message}</p>
+        <button className="again" onClick={onAgain}>close</button>
+      </section>
+    );
+  }
+  if (result.status === "paywall") {
+    return (
+      <section className="card wall">
+        <p className="walltext">Your free weekly reading is spent.</p>
+        <Pricing tiers={result.tiers || tiers} busy={checkoutBusy} onSelect={onSelectTier} />
+        <button className="again" onClick={onAgain}>back</button>
       </section>
     );
   }
@@ -160,6 +327,11 @@ function Styles() {
       }
       .tag{font-style:italic;color:var(--leaf-soft);margin:0;font-size:15px;letter-spacing:.02em}
 
+      .purchasenotice{
+        text-align:center;color:var(--gold);font-style:italic;font-size:14px;
+        margin:0 0 16px;letter-spacing:.02em;
+      }
+
       .asker{margin-top:8px}
       .prompt{color:#cfc8b8;font-size:16px;line-height:1.55;margin:0 0 18px}
       .prompt em{color:var(--gold);font-style:italic}
@@ -182,6 +354,33 @@ function Styles() {
       .cast:not(:disabled):active{transform:translateY(1px)}
       .fineprint{text-align:center;color:#7c8394;font-size:13px;margin-top:14px;letter-spacing:.01em}
 
+      .balanceline{
+        text-align:center;color:#9a927e;font-size:13px;margin:14px 0 0;
+        letter-spacing:.02em;display:flex;align-items:center;justify-content:center;gap:10px;
+      }
+      .managelink{
+        background:none;border:none;color:var(--gold);font-family:'Newsreader',serif;
+        font-style:italic;font-size:13px;cursor:pointer;padding:0;text-decoration:underline;
+      }
+
+      .pricing{margin-top:8px}
+      .tiers{display:flex;flex-direction:column;gap:12px}
+      .tier{
+        background:rgba(243,239,231,.04);border:1px solid var(--ink2);border-radius:14px;
+        padding:16px 18px;display:flex;align-items:center;flex-wrap:wrap;gap:4px 14px;
+      }
+      .tiername{font-family:'Fraunces',serif;font-weight:600;font-size:16px;color:var(--porcelain);flex:1 1 auto}
+      .tierprice{font-family:'Fraunces',serif;font-weight:600;font-size:18px;color:var(--gold)}
+      .tierper{font-size:12px;color:#9a927e;font-weight:400}
+      .tierdesc{flex-basis:100%;color:#9a927e;font-size:13.5px;margin-top:-2px}
+      .tierbtn{
+        margin-left:auto;padding:9px 18px;border:1px solid var(--leaf-soft);border-radius:10px;
+        background:transparent;color:var(--leaf-soft);font-family:'Fraunces',serif;
+        font-size:13.5px;letter-spacing:.06em;cursor:pointer;
+      }
+      .tierbtn:disabled{opacity:.5;cursor:default}
+      .tierbtn:not(:disabled):active{transform:translateY(1px)}
+
       .card{
         margin-top:6px;background:linear-gradient(180deg,#f6f2ea 0%,#efe9dd 100%);
         color:var(--ink);border-radius:18px;padding:24px 22px 20px;
@@ -189,6 +388,10 @@ function Styles() {
         animation:rise .5s cubic-bezier(.2,.7,.2,1) both;
       }
       @keyframes rise{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:none}}
+      .softcap{
+        font-style:italic;color:var(--tea);font-size:14px;line-height:1.5;
+        margin:0 0 16px;padding-bottom:14px;border-bottom:1px solid var(--line);
+      }
       .conf{
         display:inline-block;font-family:'Fraunces',serif;font-size:12px;
         letter-spacing:.14em;text-transform:uppercase;color:var(--tea);
@@ -231,6 +434,8 @@ function Styles() {
       .silenttext{font-size:18px;line-height:1.55;text-align:center;color:#d4cdbd;margin:14px 4px 4px;font-style:italic}
       .walltext{font-size:17px;line-height:1.6;color:#e3dccb;margin:2px 2px 4px}
       .card.silent .again, .card.wall .again{border-color:#39414f;color:#b8b1a1}
+      .card.wall .tier{border-color:#39414f;background:rgba(243,239,231,.03)}
+      .card.wall .tiername{color:#e3dccb}
 
       .foot{margin-top:auto;padding-top:26px;text-align:center;color:#5f6675;font-size:12.5px;letter-spacing:.02em}
 
