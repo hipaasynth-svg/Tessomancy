@@ -38,6 +38,13 @@ You need these keys in `.env.local`:
 - `STRIPE_SECRET_KEY` — a **test-mode** secret key from dashboard.stripe.com
 - `UPSTASH_REDIS_REST_URL` / `UPSTASH_REDIS_REST_TOKEN` — a free Redis database from upstash.com/redis
 - `STRIPE_WEBHOOK_SECRET` — run `stripe listen --forward-to localhost:3000/api/webhook` (Stripe CLI) and copy the `whsec_...` it prints
+- `DATABASE_URL` — a Postgres connection string (Neon, Supabase, or any Postgres), for Question Insights
+- `ADMIN_TOKEN` / `CRON_SECRET` — two secrets you generate yourself (`openssl rand -hex 32`), for Question Insights
+
+Once `DATABASE_URL` is set, create the Insights tables:
+```bash
+npm run db:init-insights
+```
 
 ## Deploy to Vercel
 
@@ -48,6 +55,9 @@ You need these keys in `.env.local`:
 5. Deploy once so the `/api/webhook` URL exists, e.g. `https://your-app.vercel.app/api/webhook`.
 6. In the Stripe Dashboard, add a webhook endpoint at that URL listening for `checkout.session.completed`, `customer.subscription.created`, `customer.subscription.updated`, and `customer.subscription.deleted`. Copy its signing secret into `STRIPE_WEBHOOK_SECRET` and redeploy.
 7. Flip `STRIPE_SECRET_KEY` and the webhook to live mode when you're ready to charge real cards.
+8. Add a Postgres database from the Vercel Marketplace (or Neon/Supabase directly) and set `DATABASE_URL`. Run `npm run db:init-insights` once (locally, pointed at the production `DATABASE_URL`) to create the Insights tables.
+9. Set `ADMIN_TOKEN` and `CRON_SECRET` in **Project Settings → Environment Variables** — both are secrets you generate yourself, not values Vercel or Stripe give you.
+10. `vercel.json` already defines the quarterly report cron; Vercel picks it up automatically on deploy.
 
 ## Model choices (edit in `lib/models.js`)
 - Gate / Render: `claude-haiku-4-5-20251001`
@@ -85,5 +95,34 @@ Four tiers, defined in `lib/tiers.js` (the single source of truth for pricing):
 
 Checkout is Stripe Checkout (hosted), not custom card forms — `app/api/checkout/route.js` creates the session, `app/api/webhook/route.js` grants pack balances and tracks subscription status/period from Stripe's events, and `app/api/portal/route.js` opens Stripe's hosted Customer Portal for subscribers to self-manage or cancel.
 
+## Question Insights — a second product
+
+A separate, B2B, aggregate-only data product built from the questions flowing through the oracle. It does not change the oracle's behavior, pricing, or public API in any way — it's a read of what already happens in the pipeline, stored in its own Postgres tables (`lib/insightsSchema.sql`), sold through its own routes, to its own customers.
+
+**What gets logged, per verdict (`lib/insightsLog.js`, called from `app/api/verdict/route.js` via `waitUntil` so it never adds latency):**
+- domain, the Gate's decision (`SPEAK`/`STAY_SILENT`/`BLOCK`) and wall type if blocked
+- for spoken verdicts only: a small set of coarse, bucketed **coordinates** (age range, prior marriages, cohabitation, etc. — see `lib/insightsExtract.js`), the ranked outcomes, and the confidence label
+- a coarse region (country, or country + state, from Vercel's geo headers — never an IP)
+- a timestamp truncated to the hour
+
+**What never gets logged, anywhere:** the free-text question itself, an IP address, a device fingerprint, or any billing/device identifier (`tess_device`/`tess_customer`). A row in `insight_events` cannot be linked back to a specific asker or to their oracle billing status.
+
+**Coordinates are extracted by a *separate* step, not the real pipeline.** The oracle's intake is free text — there's no structured form. `lib/insightsExtract.js` runs one extra, cheap (Haiku) LLM call, *only for spoken verdicts*, whose sole job is turning the question into a handful of enum-only bucket values (defined per domain in `DOMAIN_SCHEMAS`) for logging. It never feeds back into Gate/Eyes/Reason/Render, and every value is validated against a hard whitelist server-side — the free text itself is never returned or stored. Silent/blocked questions are logged without this extra call, so refusals stay near-free per the pipeline's existing cost design.
+
+**Aggregation floor (`lib/insights.js`):** every statistic — in both delivery formats below — passes through this one module, and any slice built from fewer than `MIN_AGGREGATE_THRESHOLD` (20) underlying records comes back `suppressed: true` instead of a real number. This applies per-bucket, not just to the overall query, so a lopsided breakdown can't leak a small slice by hiding inside a large total.
+
+**Two delivery formats, two different customers:**
+1. **Real-time feed** — `GET /api/insights/feed?metric=...&domain=...`, authenticated via an `x-api-key` header, rate-limited per tier (`basic`/`pro`/`enterprise`, see `lib/apiKeys.js`) using the same Upstash Redis as billing. Metrics: `domain_volume`, `volume_trend`, `gate_decision_breakdown`, `confidence_breakdown`, `coordinate_distribution`.
+2. **Quarterly report** — a Vercel Cron job (`vercel.json`) hits `POST /api/insights/reports/generate` at the start of each quarter, compiling a Markdown report for the quarter that just ended (`lib/insightsReport.js`) and storing it. `GET /api/insights/reports?quarter=2026-Q2` (admin-only) retrieves it for manual delivery to report subscribers — there's no automated email step yet.
+
+**Provisioning is manual for v1** (no self-serve signup): mint a customer's API key with
+```bash
+curl -X POST https://your-app.vercel.app/api/insights/keys \
+  -H "authorization: Bearer $ADMIN_TOKEN" \
+  -H "content-type: application/json" \
+  -d '{"customerName":"Acme Data Co","tier":"pro"}'
+```
+The plaintext key is shown exactly once — only its hash is stored.
+
 ## Next domains
-Add a new `data/<domain>.json` in the same shape (`baselines`, `factors`, `mirror_stats`) and register it in `app/api/verdict/route.js`'s `MEMORY` map. The gate already handles unknown domains gracefully.
+Add a new `data/<domain>.json` in the same shape (`baselines`, `factors`, `mirror_stats`) and register it in `app/api/verdict/route.js`'s `MEMORY` map. The gate already handles unknown domains gracefully. If the domain has coordinate-worthy fields, add a matching entry to `DOMAIN_SCHEMAS` in `lib/insightsExtract.js` so Insights can bucket it too — optional, Insights degrades gracefully (no coordinates) for domains without a schema.

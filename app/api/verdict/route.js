@@ -1,3 +1,4 @@
+import { waitUntil } from "@vercel/functions";
 import { runGate } from "../../../lib/gate.js";
 import { runEyes } from "../../../lib/eyes.js";
 import { runReason } from "../../../lib/reason.js";
@@ -5,6 +6,8 @@ import { runRender } from "../../../lib/render.js";
 import relationships from "../../../data/relationships.json";
 import { getOrCreateDeviceToken, getCustomerId, checkAndConsumeAccess, publicTiers } from "../../../lib/access.js";
 import { HARD_CAP_MESSAGE } from "../../../lib/tiers.js";
+import { logBlocked, logSilent, logSpoken, coarseRegionFromHeaders } from "../../../lib/insightsLog.js";
+import { extractCoordinates } from "../../../lib/insightsExtract.js";
 
 export const runtime = "nodejs";
 export const maxDuration = 30;
@@ -35,6 +38,11 @@ export async function POST(req) {
       return json({ status: "silent", reason: "The oracle holds no memory of that domain yet." });
     }
 
+    // Question Insights: a separate, aggregate-only product. Region is the
+    // only thing read from the request for it — coarse (country/state),
+    // never an IP address. Logging never touches billing/device identity.
+    const region = coarseRegionFromHeaders(req.headers);
+
     // 0) ACCESS — balance/subscription check, BEFORE the Gate fires. Protects
     // margin: an unpayable request never reaches the LLM pipeline below.
     const deviceToken = getOrCreateDeviceToken();
@@ -52,6 +60,7 @@ export async function POST(req) {
     const gate = await runGate(question, domain);
 
     if (gate.decision === "BLOCK") {
+      waitUntil(logBlocked({ domain, wallType: gate.wall, region }));
       return json({
         status: "wall",
         wall: gate.wall,
@@ -59,6 +68,7 @@ export async function POST(req) {
       });
     }
     if (gate.decision === "STAY_SILENT") {
+      waitUntil(logSilent({ domain, region }));
       return json({
         status: "silent",
         reason:
@@ -73,6 +83,7 @@ export async function POST(req) {
     // 3) REASON — the real odds, grounded in memory. (Sonnet)
     const ranked = await runReason(question, domain, mem, eyes.findings);
     if (!ranked) {
+      waitUntil(logSilent({ domain, region }));
       return json({
         status: "silent",
         reason: "The oracle looked, but could not form honest odds from what she holds.",
@@ -81,6 +92,21 @@ export async function POST(req) {
 
     // 4) RENDER + MIRROR — cheap phrasing, true mirror stat.
     const face = await runRender(ranked.outcomes, mem.mirror_stats);
+
+    // Question Insights logging, in the background: extracting coordinates is
+    // an extra small LLM call, so it only runs for spoken verdicts (silent/
+    // blocked stay near-free, per the pipeline's cost design). It never feeds
+    // back into the response above, and never sees anything beyond `question`.
+    waitUntil(
+      (async () => {
+        try {
+          const coordinates = await extractCoordinates(question, domain);
+          await logSpoken({ domain, coordinates, outcomes: ranked.outcomes, confidence: ranked.confidence, region });
+        } catch (e) {
+          console.error("insights logging failed (non-fatal)", e);
+        }
+      })()
+    );
 
     return json({
       status: "spoken",

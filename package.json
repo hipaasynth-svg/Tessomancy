@@ -5,13 +5,16 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
-    "start": "next start"
+    "start": "next start",
+    "db:init-insights": "node scripts/init-insights-db.js"
   },
   "dependencies": {
     "next": "14.2.5",
     "react": "18.3.1",
     "react-dom": "18.3.1",
     "stripe": "16.12.0",
-    "@upstash/redis": "1.34.0"
+    "@upstash/redis": "1.34.0",
+    "pg": "8.13.1",
+    "@vercel/functions": "1.6.0"
   }
 }
