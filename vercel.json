@@ -1,0 +1,8 @@
+{
+  "crons": [
+    {
+      "path": "/api/insights/reports/generate",
+      "schedule": "0 6 1 1,4,7,10 *"
+    }
+  ]
+}
