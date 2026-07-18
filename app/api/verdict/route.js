@@ -3,6 +3,8 @@ import { runEyes } from "../../../lib/eyes.js";
 import { runReason } from "../../../lib/reason.js";
 import { runRender } from "../../../lib/render.js";
 import relationships from "../../../data/relationships.json";
+import { getOrCreateDeviceToken, getCustomerId, checkAndConsumeAccess, publicTiers } from "../../../lib/access.js";
+import { HARD_CAP_MESSAGE } from "../../../lib/tiers.js";
 
 export const runtime = "nodejs";
 export const maxDuration = 30;
@@ -31,6 +33,19 @@ export async function POST(req) {
     const mem = MEMORY[domain];
     if (!mem) {
       return json({ status: "silent", reason: "The oracle holds no memory of that domain yet." });
+    }
+
+    // 0) ACCESS — balance/subscription check, BEFORE the Gate fires. Protects
+    // margin: an unpayable request never reaches the LLM pipeline below.
+    const deviceToken = getOrCreateDeviceToken();
+    const customerId = getCustomerId();
+    const access = await checkAndConsumeAccess({ deviceToken, customerId });
+
+    if (!access.allowed) {
+      if (access.hardCapped) {
+        return json({ status: "rested", message: HARD_CAP_MESSAGE });
+      }
+      return json({ status: "paywall", tiers: publicTiers() });
     }
 
     // 1) THE GATE — cheap, first, always. Enforces walls + speak/silent.
@@ -75,6 +90,7 @@ export async function POST(req) {
       basis: ranked.basis,
       mirror: face.mirror,
       disclaimer: DISCLAIMER,
+      softCapNotice: access.softCapNotice || null,
     });
   } catch (e) {
     return json({ status: "error", message: "The oracle went quiet unexpectedly.", detail: String(e) }, 500);

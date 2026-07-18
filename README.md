@@ -6,9 +6,10 @@ First seed domain: **relationships / marriage outcomes.**
 
 ---
 
-## The pipeline (five parts)
+## The pipeline (five parts, plus a paywall in front)
 
-1. **The Gate** (`lib/gate.js`) — runs first, on every question, cheaply (Claude Haiku). Enforces the three hard walls (self-harm, harm to others, minors → refuse) and decides `SPEAK` vs `STAY_SILENT`. Silence is a feature.
+0. **Access** (`lib/access.js`) — runs before anything else, on every request, no LLM calls. Checks free-taste / pack balance / subscription cap and consumes the unit if eligible; if not, the request stops here with a paywall or a rest message. See "Payment & usage caps" below.
+1. **The Gate** (`lib/gate.js`) — runs first in the actual pipeline, on every question that clears Access, cheaply (Claude Haiku). Enforces the three hard walls (self-harm, harm to others, minors → refuse) and decides `SPEAK` vs `STAY_SILENT`. Silence is a feature.
 2. **The Eyes** (`lib/eyes.js`) — a light live-pulse read via **Grok** for current signal. Non-fatal if it fails.
 3. **Reason + Reconcile** (`lib/reason.js`) — the quality-critical step (Claude Sonnet). Weighs the seed memory's real base rates against the question, produces honest ranked odds + a confidence/thinness label. Fires only *after* the gate says SPEAK.
 4. **Render + Mirror** (`lib/render.js`) — cheap phrasing (Haiku). Turns odds into a verdict card and picks **the Mirror**: one true, wry stat (chosen from the memory's `mirror_stats`, never invented) that reframes the question.
@@ -31,16 +32,22 @@ cp .env.local.example .env.local   # then paste your real keys
 npm run dev                        # http://localhost:3000
 ```
 
-You need two keys in `.env.local`:
+You need these keys in `.env.local`:
 - `ANTHROPIC_API_KEY` — from console.anthropic.com
 - `GROK_API_KEY` — from console.x.ai
+- `STRIPE_SECRET_KEY` — a **test-mode** secret key from dashboard.stripe.com
+- `UPSTASH_REDIS_REST_URL` / `UPSTASH_REDIS_REST_TOKEN` — a free Redis database from upstash.com/redis
+- `STRIPE_WEBHOOK_SECRET` — run `stripe listen --forward-to localhost:3000/api/webhook` (Stripe CLI) and copy the `whsec_...` it prints
 
 ## Deploy to Vercel
 
 1. Push this folder to a GitHub repo.
 2. In Vercel: **New Project → import the repo**.
-3. Add the two environment variables (`ANTHROPIC_API_KEY`, `GROK_API_KEY`) in **Project Settings → Environment Variables**.
-4. Deploy. That's it — the API route runs as a serverless function.
+3. Add a Redis database from the Vercel Marketplace ("Upstash") to the project — this sets `UPSTASH_REDIS_REST_URL`/`UPSTASH_REDIS_REST_TOKEN` automatically — or create one yourself at upstash.com and add the two vars manually.
+4. Add the remaining environment variables (`ANTHROPIC_API_KEY`, `GROK_API_KEY`, `STRIPE_SECRET_KEY`) in **Project Settings → Environment Variables**.
+5. Deploy once so the `/api/webhook` URL exists, e.g. `https://your-app.vercel.app/api/webhook`.
+6. In the Stripe Dashboard, add a webhook endpoint at that URL listening for `checkout.session.completed`, `customer.subscription.created`, `customer.subscription.updated`, and `customer.subscription.deleted`. Copy its signing secret into `STRIPE_WEBHOOK_SECRET` and redeploy.
+7. Flip `STRIPE_SECRET_KEY` and the webhook to live mode when you're ready to charge real cards.
 
 ## Model choices (edit in `lib/models.js`)
 - Gate / Render: `claude-haiku-4-5-20251001`
@@ -56,8 +63,27 @@ If any model string is out of date, update it there — it's the single source o
 - **Honest silence.** When the data is thin or the question is unanswerable, she says so.
 - **The Mirror is true.** Sourced from memory, never fabricated.
 
-## Payment (not built yet)
-The MVP has no paywall — it's for testing whether the verdict *lands*. When ready, gate the full verdict behind a small pack purchase (e.g. 5 for $3) to beat processing flat fees; keep a cheap free taste for virality.
+## Payment & usage caps
+
+Four tiers, defined in `lib/tiers.js` (the single source of truth for pricing):
+
+| Tier | Price | Grants |
+|---|---|---|
+| Free taste | free | 1 verdict per anonymous device, per rolling 7 days |
+| Single Pack | $2.99 | 3 verdicts (consumed as a balance) |
+| Standard Pack | $6.99 | 10 verdicts (consumed as a balance) |
+| Monthly Subscription | $9.99/mo | unlimited within fair use (see caps below) |
+
+**Identity, without accounts.** An httpOnly `tess_device` cookie (random id) tracks the free-taste window. Once someone buys a pack or subscribes, a Stripe Customer is created and its id is stored in a second httpOnly `tess_customer` cookie — that id, a pack balance, and a rolling usage counter (keyed in Upstash Redis) are the *only* things stored server-side. No names or emails beyond whatever Stripe itself collects for the transaction.
+
+**Usage caps (subscription only — packs and free taste aren't capped, they just run out):**
+- **Soft cap, 50 verdicts/period:** not blocked — the verdict still renders normally, with an in-character line above it ("The oracle has spoken generously with you this month; she grows quiet toward the renewal.").
+- **Hard cap, 100 verdicts/period:** the pipeline doesn't run at all — no Gate, no Eyes, no Reason, no LLM calls of any kind. Just a static in-character line ("She rests until the turning of the month."). This is an abuse backstop, not a normal-use limit.
+- The counter resets when Stripe reports the subscription's billing period has rolled over (`customer.subscription.updated`), not on a fixed calendar date.
+
+**Ordering, for margin:** `app/api/verdict/route.js` checks and consumes access *before* the Gate fires. A request with no free taste, no pack balance, and no active (non-hard-capped) subscription never reaches an LLM — it gets a paywall response instead. This is additive in front of the existing pipeline; the Gate, the three hard walls, field-not-person/odds-not-advice, and the Mirror are unchanged.
+
+Checkout is Stripe Checkout (hosted), not custom card forms — `app/api/checkout/route.js` creates the session, `app/api/webhook/route.js` grants pack balances and tracks subscription status/period from Stripe's events, and `app/api/portal/route.js` opens Stripe's hosted Customer Portal for subscribers to self-manage or cancel.
 
 ## Next domains
 Add a new `data/<domain>.json` in the same shape (`baselines`, `factors`, `mirror_stats`) and register it in `app/api/verdict/route.js`'s `MEMORY` map. The gate already handles unknown domains gracefully.
