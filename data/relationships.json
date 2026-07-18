@@ -1,0 +1,36 @@
+{
+  "domain": "relationships",
+  "note": "Base-rate reference data for relationship/marriage outcomes. Figures are approximate, drawn from widely-cited public research (US CDC/NCHS marriage-divorce data, longitudinal relationship studies, Pew, and academic dissolution research). Treat as planning base rates, not precise truths. Each factor lists directional effect on the odds a relationship endures. The reasoning model uses these as grounding, not as a lookup table.",
+  "sources_general": [
+    "US CDC/NCHS marriage & divorce statistics",
+    "Pew Research relationship & marriage reports",
+    "Longitudinal relationship-dissolution research (e.g., Gottman body of work; Stanford How Couples Meet studies)"
+  ],
+  "baselines": {
+    "first_marriage_reaching_10yr": 0.68,
+    "first_marriage_reaching_20yr": 0.52,
+    "marriage_ending_in_divorce_lifetime": 0.43,
+    "second_marriage_ending_in_divorce": 0.60,
+    "cohabiting_couples_still_together_5yr": 0.42,
+    "dating_relationships_lasting_past_1yr": 0.50
+  },
+  "factors": [
+    { "factor": "married_before_age_20", "direction": "lowers", "magnitude": "strong", "note": "Marrying very young is one of the strongest predictors of divorce." },
+    { "factor": "married_after_age_25", "direction": "raises", "magnitude": "moderate", "note": "Later marriage correlates with greater stability, up to a point." },
+    { "factor": "large_age_gap_10yr_plus", "direction": "lowers", "magnitude": "moderate", "note": "Wider age gaps correlate with higher dissolution rates." },
+    { "factor": "both_college_educated", "direction": "raises", "magnitude": "moderate", "note": "Higher education correlates with marital stability." },
+    { "factor": "prior_divorce_either_partner", "direction": "lowers", "magnitude": "moderate", "note": "Remarriages dissolve at higher rates than first marriages." },
+    { "factor": "cohabited_before_engagement", "direction": "lowers", "magnitude": "weak", "note": "Historically associated with slightly higher divorce risk; effect is debated and shrinking." },
+    { "factor": "shared_finances_low_conflict", "direction": "raises", "magnitude": "moderate", "note": "Financial compatibility and low money-conflict predict stability." },
+    { "factor": "frequent_contempt_or_stonewalling", "direction": "lowers", "magnitude": "strong", "note": "Contempt and stonewalling are among the strongest predictors of breakup (Gottman)." },
+    { "factor": "long_distance_over_1yr", "direction": "lowers", "magnitude": "weak", "note": "Long distance raises dissolution risk modestly; many survive it." },
+    { "factor": "strong_shared_social_network", "direction": "raises", "magnitude": "weak", "note": "Couples embedded in shared networks tend to last longer." }
+  ],
+  "mirror_stats": [
+    "About 43% of first marriages in the US end in divorce — meaning most, but not all, endure.",
+    "Roughly 60% of second marriages end in divorce, a higher rate than firsts.",
+    "The single strongest predictor of a breakup isn't conflict — it's contempt.",
+    "Couples who marry after 25 divorce at markedly lower rates than those who marry before 20.",
+    "Around half of dating relationships don't survive their first year — the ones that do have already beaten the odds."
+  ]
+}
