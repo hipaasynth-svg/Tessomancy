@@ -130,7 +130,12 @@ export default function Home() {
       )}
 
       {state !== "done" && !restingUntilRenewal && showPricing && (
-        <Pricing tiers={billing.tiers} busy={checkoutBusy} onSelect={startCheckout} />
+        <Pricing
+          tiers={billing.tiers}
+          busy={checkoutBusy}
+          onSelect={startCheckout}
+          freeTasteResetsInDays={billing.freeTasteResetsInDays}
+        />
       )}
 
       {state !== "done" && !restingUntilRenewal && !showPricing && (
@@ -139,6 +144,10 @@ export default function Home() {
             Only facts, never novelty. Curated statistics with real-world uses, to
             inform our users for responsible understanding of tough situations
             and life's glorious moments. <em>We're glad you're here.</em>
+          </p>
+          <p className="tease">
+            There's a real answer to this — most people guess wrong. You're here
+            because you want it straight.
           </p>
           <textarea
             className="field"
@@ -169,7 +178,14 @@ export default function Home() {
       )}
 
       <footer className="foot">
-        A probabilistic reading, not advice. Not a wager.
+        <svg className="moon" width="22" height="22" viewBox="0 0 22 22" aria-hidden="true">
+          <mask id="moonMask">
+            <rect width="22" height="22" fill="white" />
+            <circle cx="14" cy="8" r="7.5" fill="black" />
+          </mask>
+          <circle cx="11" cy="11" r="7.5" fill="var(--gold)" mask="url(#moonMask)" />
+        </svg>
+        <p className="footline">A probabilistic reading, not advice. Not a wager.</p>
       </footer>
     </main>
   );
@@ -199,13 +215,19 @@ function BillingLine({ billing, onManage }) {
   return null;
 }
 
-function Pricing({ tiers, busy, onSelect }) {
+function Pricing({ tiers, busy, onSelect, freeTasteResetsInDays }) {
   if (!tiers) return null;
   return (
     <section className="pricing">
       <p className="prompt">
         Your free weekly reading is spent. Choose how you'd like to keep asking.
       </p>
+      {freeTasteResetsInDays && (
+        <p className="scarcity">
+          Your next free reading unlocks in {freeTasteResetsInDays} day{freeTasteResetsInDays === 1 ? "" : "s"}
+          {" "}— or skip the wait:
+        </p>
+      )}
       <div className="tiers">
         {tiers.map((t) => (
           <div className="tier" key={t.key}>
@@ -224,6 +246,40 @@ function Pricing({ tiers, busy, onSelect }) {
         ))}
       </div>
     </section>
+  );
+}
+
+function MirrorBlock({ mirror }) {
+  const [shareState, setShareState] = useState("idle"); // idle | copied
+
+  async function share() {
+    const text = `"${mirror}"\n\n— Tessomancy, the odds, honestly`;
+    const url = "https://tessomancy.com";
+    if (typeof navigator !== "undefined" && navigator.share) {
+      try {
+        await navigator.share({ text, url });
+      } catch {
+        // user cancelled — not an error
+      }
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(`${text}\n${url}`);
+      setShareState("copied");
+      setTimeout(() => setShareState("idle"), 2000);
+    } catch {
+      // clipboard unavailable — nothing more we can do
+    }
+  }
+
+  return (
+    <div className="mirror">
+      <span className="mlabel">the mirror</span>
+      <p>{mirror}</p>
+      <button className="sharebtn" onClick={share}>
+        {shareState === "copied" ? "copied" : "share this"}
+      </button>
+    </div>
   );
 }
 
@@ -246,10 +302,7 @@ function Verdict({ result, onAgain, tiers, checkoutBusy, onSelectTier }) {
           ))}
         </ul>
         {result.basis && <p className="basis">{result.basis}</p>}
-        <div className="mirror">
-          <span className="mlabel">the mirror</span>
-          <p>{result.mirror}</p>
-        </div>
+        <MirrorBlock mirror={result.mirror} />
         <p className="disclaimer">{result.disclaimer}</p>
         <button className="again" onClick={onAgain}>ask another</button>
       </section>
@@ -285,7 +338,12 @@ function Verdict({ result, onAgain, tiers, checkoutBusy, onSelectTier }) {
     return (
       <section className="card wall">
         <p className="walltext">Your free weekly reading is spent.</p>
-        <Pricing tiers={result.tiers || tiers} busy={checkoutBusy} onSelect={onSelectTier} />
+        <Pricing
+          tiers={result.tiers || tiers}
+          busy={checkoutBusy}
+          onSelect={onSelectTier}
+          freeTasteResetsInDays={result.freeTasteResetsInDays}
+        />
         <button className="again" onClick={onAgain}>back</button>
       </section>
     );
@@ -327,7 +385,7 @@ function Styles() {
         min-height:100dvh;display:flex;flex-direction:column;
       }
       .masthead{text-align:center;margin:14px 0 26px}
-      .mark{color:#e0b566;font-size:20px;letter-spacing:2px;opacity:1;text-shadow:0 0 12px rgba(224,181,102,.55)}
+      .mark{color:#ffe135;font-size:20px;letter-spacing:2px;opacity:1;text-shadow:0 0 14px rgba(255,225,53,.75)}
       .masthead h1{
         font-family:'Fraunces',serif;font-weight:600;
         font-size:30px;letter-spacing:.14em;margin:6px 0 2px;
@@ -343,6 +401,9 @@ function Styles() {
       .asker{margin-top:8px}
       .prompt{color:#cfc8b8;font-size:16px;line-height:1.55;margin:0 0 18px}
       .prompt em{color:var(--gold);font-style:italic}
+      .tease{color:var(--gold);font-style:italic;font-size:15px;line-height:1.5;margin:0 0 16px}
+
+      .scarcity{color:#9a927e;font-size:13.5px;font-style:italic;margin:0 0 14px;line-height:1.5}
       .field{
         width:100%;background:rgba(243,239,231,.04);
         border:1px solid var(--ink2);border-radius:14px;
@@ -425,6 +486,11 @@ function Styles() {
         border-left:3px solid var(--leaf);border-radius:6px}
       .mlabel{font-family:'Fraunces',serif;font-size:11px;letter-spacing:.2em;text-transform:uppercase;color:var(--tea)}
       .mirror p{margin:6px 0 0;font-size:16px;line-height:1.5;color:var(--ink);font-style:italic}
+      .sharebtn{
+        margin-top:10px;padding:6px 0;border:none;background:none;
+        color:var(--tea);font-family:'Fraunces',serif;font-size:12px;
+        letter-spacing:.1em;text-transform:uppercase;cursor:pointer;text-decoration:underline;
+      }
 
       .disclaimer{font-size:12.5px;color:#8a8272;line-height:1.5;margin:16px 0 0}
       .again{
@@ -445,7 +511,9 @@ function Styles() {
       .card.wall .tier{border-color:#39414f;background:rgba(243,239,231,.03)}
       .card.wall .tiername{color:#e3dccb}
 
-      .foot{margin-top:auto;padding-top:26px;text-align:center;color:#5f6675;font-size:12.5px;letter-spacing:.02em}
+      .foot{margin-top:auto;padding-top:26px;text-align:center}
+      .moon{display:block;margin:0 auto 10px;opacity:.85}
+      .footline{color:#5f6675;font-size:12.5px;letter-spacing:.02em;margin:0}
 
       @media (prefers-reduced-motion:reduce){
         .card,.fill{animation:none}

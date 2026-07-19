@@ -4,7 +4,13 @@ import { runEyes } from "../../../lib/eyes.js";
 import { runReason } from "../../../lib/reason.js";
 import { runRender } from "../../../lib/render.js";
 import relationships from "../../../data/relationships.json";
-import { getOrCreateDeviceToken, getCustomerId, checkAndConsumeAccess, publicTiers } from "../../../lib/access.js";
+import {
+  getOrCreateDeviceToken,
+  getCustomerId,
+  checkAndConsumeAccess,
+  publicTiers,
+  getFreeTasteResetsInDays,
+} from "../../../lib/access.js";
 import { HARD_CAP_MESSAGE } from "../../../lib/tiers.js";
 import { logBlocked, logSilent, logSpoken, coarseRegionFromHeaders } from "../../../lib/insightsLog.js";
 import { extractCoordinates } from "../../../lib/insightsExtract.js";
@@ -53,7 +59,8 @@ export async function POST(req) {
       if (access.hardCapped) {
         return json({ status: "rested", message: HARD_CAP_MESSAGE });
       }
-      return json({ status: "paywall", tiers: publicTiers() });
+      const freeTasteResetsInDays = await getFreeTasteResetsInDays(deviceToken);
+      return json({ status: "paywall", tiers: publicTiers(), freeTasteResetsInDays });
     }
 
     // 1) THE GATE — cheap, first, always. Enforces walls + speak/silent.
