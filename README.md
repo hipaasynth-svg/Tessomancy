@@ -97,6 +97,23 @@ Four tiers, defined in `lib/tiers.js` (the single source of truth for pricing):
 
 Checkout is Stripe Checkout (hosted), not custom card forms — `app/api/checkout/route.js` creates the session, `app/api/webhook/route.js` grants pack balances and tracks subscription status/period from Stripe's events, and `app/api/portal/route.js` opens Stripe's hosted Customer Portal for subscribers to self-manage or cancel.
 
+### Promo codes
+
+A "have a code?" link sits on the paywall/pricing screen (and quietly on the asker screen, above the fineprint) so codes can be redeemed without a Stripe checkout. One mechanism, two uses: gift/marketing codes that grant a handful of verdicts, and an **unlimited** code (for the owner, testers, press) that bypasses the paywall entirely, forever, on whatever browser redeems it — no separate admin backdoor needed.
+
+Codes live in Redis (`lib/promo.js`) and are minted via an admin-only route, no deploy required:
+
+```bash
+curl -X POST https://tessomancy.com/api/admin-promo \
+  -H "Authorization: Bearer $ADMIN_SECRET" \
+  -H "content-type: application/json" \
+  -d '{"code":"OWNERTEST","unlimited":true,"maxRedemptions":1}'
+```
+
+Requires an `ADMIN_SECRET` env var (set your own long random value in Vercel) — the route 500s if it's unset, so it can never be silently open. Body fields: `code` (required), `verdicts` (grants that many packs), `unlimited` (true/false, bypasses the paywall permanently for whoever redeems it), `maxRedemptions` (optional cap on total redemptions), `expiresInDays` (optional). A code is either a verdicts-grant or `unlimited`, not both.
+
+To test freely yourself: mint one `unlimited: true, maxRedemptions: 1` code, redeem it once via the site's "have a code?" link, and that browser never sees the paywall again.
+
 ## Question Insights — a second product
 
 A separate, B2B, aggregate-only data product built from the questions flowing through the oracle. It does not change the oracle's behavior, pricing, or public API in any way — it's a read of what already happens in the pipeline, stored in its own Postgres tables (`lib/insightsSchema.sql`), sold through its own routes, to its own customers.
