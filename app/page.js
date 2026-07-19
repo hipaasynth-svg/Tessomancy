@@ -136,8 +136,9 @@ export default function Home() {
       {state !== "done" && !restingUntilRenewal && !showPricing && (
         <section className="asker">
           <p className="prompt">
-            Ask about a relationship. Not <em>your</em> person — the oracle reads the
-            odds for situations like yours, drawn from real data.
+            Only facts, never novelty. Curated statistics with real-world uses, to
+            inform our users for responsible understanding of tough situations
+            and life's glorious moments. <em>We're glad you're here.</em>
           </p>
           <textarea
             className="field"
@@ -148,7 +149,7 @@ export default function Home() {
             disabled={state === "asking"}
           />
           <button className="cast" onClick={ask} disabled={state === "asking" || question.trim().length < 3}>
-            {state === "asking" ? "reading the leaves…" : "cast"}
+            {state === "asking" ? "reading the leaves…" : "enlighten me"}
           </button>
           <BillingLine billing={billing} onManage={openPortal} />
           <p className="fineprint">
@@ -326,7 +327,7 @@ function Styles() {
         min-height:100dvh;display:flex;flex-direction:column;
       }
       .masthead{text-align:center;margin:14px 0 26px}
-      .mark{color:var(--gold);font-size:20px;letter-spacing:2px;opacity:.85}
+      .mark{color:#e0b566;font-size:20px;letter-spacing:2px;opacity:1;text-shadow:0 0 12px rgba(224,181,102,.55)}
       .masthead h1{
         font-family:'Fraunces',serif;font-weight:600;
         font-size:30px;letter-spacing:.14em;margin:6px 0 2px;
@@ -349,7 +350,7 @@ function Styles() {
         padding:15px 16px;line-height:1.5;resize:none;outline:none;
       }
       .field:focus{border-color:var(--leaf-soft);background:rgba(243,239,231,.06)}
-      .field::placeholder{color:#7c8394}
+      .field::placeholder{color:#aab2c8}
       .cast{
         width:100%;margin-top:14px;padding:16px;border:none;border-radius:14px;
         background:linear-gradient(180deg,var(--leaf) 0%,#33493c 100%);
