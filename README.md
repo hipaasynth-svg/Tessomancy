@@ -15,7 +15,7 @@ First seed domain: **relationships / marriage outcomes.**
 4. **Render + Mirror** (`lib/render.js`) — cheap phrasing (Haiku). Turns odds into a verdict card and picks **the Mirror**: one true, wry stat (chosen from the memory's `mirror_stats`, never invented) that reframes the question.
 5. **The Face** (`app/page.js`) — the mobile UI: ask box → verdict card, with honest silence and wall states.
 
-Memory lives in `data/relationships.json` — real, sourced base rates. This is the moat: the odds are only worth anything if they're honest.
+Memory lives in `data/relationships.json` — base rates cited to specific named studies/researchers (Wolfinger's marriage-age research, Gottman's Four Horsemen, Kansas State's financial-conflict study, Stanford's HCMST project, IFS's cohabitation research, etc.), not a vague source list. Where the underlying research is genuinely mixed or a popular figure isn't traceable to one clean current dataset, the file says so explicitly rather than presenting false precision — see each baseline/factor's own `note` and `source`. This is the moat: the odds are only worth anything if they're honest, which means being honest about the data's limits too. Static by design (marriage/divorce demographics don't move week to week) — there is no live statistics API. `lib/eyes.js`'s Grok call is *not* a live data feed either; it's a plain LLM recall, not a search — see its own comment for that caveat.
 
 ## Cost shape
 - Gate + render use a small model; the expensive brain (Sonnet) fires once per *spoken* verdict, behind the gate.
