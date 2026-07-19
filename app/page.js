@@ -13,6 +13,13 @@ export default function Home() {
     try {
       const res = await fetch("/api/status");
       const data = await res.json();
+      // A failed status check must never be mistaken for "no access" — that
+      // renders a pricing screen with no tier data and goes silently blank.
+      // Leave billing as null (falls back to showing the ask box) so the
+      // per-request check in /api/verdict stays the real gate either way.
+      if (!res.ok || data.status === "error" || typeof data.hasAccess !== "boolean") {
+        return null;
+      }
       setBilling(data);
       return data;
     } catch {
