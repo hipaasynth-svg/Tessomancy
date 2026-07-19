@@ -62,7 +62,7 @@ export default function Home() {
       const res = await fetch("/api/verdict", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ question, domain: "relationships" }),
+        body: JSON.stringify({ question }),
       });
       const data = await res.json();
       setResult(data);
@@ -141,9 +141,10 @@ export default function Home() {
       {state !== "done" && !restingUntilRenewal && !showPricing && (
         <section className="asker">
           <p className="prompt">
-            Only facts, never novelty. Curated statistics with real-world uses, to
-            inform our users for responsible understanding of tough situations
-            and life's glorious moments. <em>We're glad you're here.</em>
+            Only facts, never novelty. Ask a high-stakes question about any part of
+            life — love, work, health, money — and the oracle reads the <em>real
+            odds</em> for situations like yours, drawn from live data. Not advice.
+            Never about you specifically — only the field you stand in.
           </p>
           <p className="tease">
             There's a real answer to this — most people guess wrong. You're here
@@ -152,7 +153,7 @@ export default function Home() {
           <textarea
             className="field"
             rows={3}
-            placeholder="e.g. We married at 24, both finished college, no prior marriages — will it last?"
+            placeholder="e.g. We married at 24, no prior marriages — will it last? · Do startups in my industry survive five years? · What are the odds this surgery goes without complications?"
             value={question}
             onChange={(e) => setQuestion(e.target.value)}
             disabled={state === "asking"}

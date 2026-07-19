@@ -1,7 +1,6 @@
 import { waitUntil } from "@vercel/functions";
 import { runGate } from "../../../lib/gate.js";
-import { runEyes } from "../../../lib/eyes.js";
-import { runReason } from "../../../lib/reason.js";
+import { runGroundedReason } from "../../../lib/ground.js";
 import { runRender } from "../../../lib/render.js";
 import relationships from "../../../data/relationships.json";
 import {
@@ -16,9 +15,15 @@ import { logBlocked, logSilent, logSpoken, coarseRegionFromHeaders } from "../..
 import { extractCoordinates } from "../../../lib/insightsExtract.js";
 
 export const runtime = "nodejs";
-export const maxDuration = 30;
+// Web search + reasoning can take longer than a plain LLM call.
+export const maxDuration = 60;
 
-const MEMORY = { relationships };
+// Curated, pre-vetted reference data by topic. When the Gate routes a question
+// to one of these, the data is injected into the grounded step as trusted
+// context alongside live web search. Everything else is answered from search
+// alone. Add a new topic here (and register it in the Gate's topic hint) to
+// give a domain curated grounding.
+const CURATED = { relationships };
 
 const DISCLAIMER =
   "A probabilistic reading of outcomes, not advice — not legal, medical, or financial guidance. The choice, and its consequences, are yours.";
@@ -34,14 +39,10 @@ const WALL_RESPONSES = {
 
 export async function POST(req) {
   try {
-    const { question, domain = "relationships" } = await req.json();
+    const { question } = await req.json();
 
     if (!question || question.trim().length < 3) {
       return json({ status: "error", message: "Ask a real question." }, 400);
-    }
-    const mem = MEMORY[domain];
-    if (!mem) {
-      return json({ status: "silent", reason: "The oracle holds no memory of that domain yet." });
     }
 
     // Question Insights: a separate, aggregate-only product. Region is the
@@ -63,8 +64,10 @@ export async function POST(req) {
       return json({ status: "paywall", tiers: publicTiers(), freeTasteResetsInDays });
     }
 
-    // 1) THE GATE — cheap, first, always. Enforces walls + speak/silent.
-    const gate = await runGate(question, domain);
+    // 1) THE GATE — cheap, first, always. Enforces walls + speak/silent, and
+    // hints which curated domain (if any) the question belongs to.
+    const gate = await runGate(question);
+    const domain = gate.topic; // "relationships" | "general" — used for logging + curated routing
 
     if (gate.decision === "BLOCK") {
       waitUntil(logBlocked({ domain, wallType: gate.wall, region }));
@@ -84,31 +87,35 @@ export async function POST(req) {
       });
     }
 
-    // 2) THE EYES — live pulse (non-fatal if it fails).
-    const eyes = await runEyes(question, domain);
+    // 2) GROUNDED REASON — live web search for real base rates for ANY field,
+    // plus curated reference data when the topic has it. Produces honest odds
+    // grounded in real sources, or stays silent if it can't find any. Odds
+    // about the field only — never advice, never about the individual.
+    const referenceData = CURATED[domain] || null;
+    const grounded = await runGroundedReason(question, referenceData);
 
-    // 3) REASON — the real odds, grounded in memory. (Sonnet)
-    const ranked = await runReason(question, domain, mem, eyes.findings);
-    if (!ranked) {
+    if (!grounded.speak) {
       waitUntil(logSilent({ domain, region }));
       return json({
         status: "silent",
-        reason: "The oracle looked, but could not form honest odds from what she holds.",
+        reason: "The oracle looked — searched the world for real numbers on this — but could not find honest odds to stand behind.",
       });
     }
 
-    // 4) RENDER + MIRROR — cheap phrasing, true mirror stat.
-    const face = await runRender(ranked.outcomes, mem.mirror_stats);
+    // 3) RENDER + MIRROR — cheap phrasing, one true mirror stat drawn from the
+    // real facts the grounded step surfaced.
+    const face = await runRender(grounded.outcomes, grounded.mirrorCandidates);
 
     // Question Insights logging, in the background: extracting coordinates is
     // an extra small LLM call, so it only runs for spoken verdicts (silent/
-    // blocked stay near-free, per the pipeline's cost design). It never feeds
-    // back into the response above, and never sees anything beyond `question`.
+    // blocked stay near-free). It never feeds back into the response above,
+    // never sees anything beyond `question`, and degrades to no coordinates
+    // for domains without a schema.
     waitUntil(
       (async () => {
         try {
           const coordinates = await extractCoordinates(question, domain);
-          await logSpoken({ domain, coordinates, outcomes: ranked.outcomes, confidence: ranked.confidence, region });
+          await logSpoken({ domain, coordinates, outcomes: grounded.outcomes, confidence: grounded.confidence, region });
         } catch (e) {
           console.error("insights logging failed (non-fatal)", e);
         }
@@ -118,9 +125,9 @@ export async function POST(req) {
     return json({
       status: "spoken",
       headline: face.headline,
-      outcomes: ranked.outcomes,
-      confidence: ranked.confidence,
-      basis: ranked.basis,
+      outcomes: grounded.outcomes,
+      confidence: grounded.confidence,
+      basis: grounded.basis,
       mirror: face.mirror,
       disclaimer: DISCLAIMER,
       softCapNotice: access.softCapNotice || null,

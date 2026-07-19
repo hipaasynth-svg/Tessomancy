@@ -1,26 +1,27 @@
 # Tessomancy — the oracle
 
-A mobile-first web app. You ask a high-stakes life question; it returns the **real statistical odds** for situations *like yours* — grounded in actual data, delivered as a short verdict. It is **not advice**, **not a wager**, and it **never predicts you specifically** — only the field you stand in. Anonymous: no account, no name; questions are remembered, people are not.
+A mobile-first web app. You ask a high-stakes life question — about **any** domain (love, work, health, money, life events) — and it returns the **real statistical odds** for situations *like yours*, grounded in **live web search** for real published data, delivered as a short verdict. It is **not advice**, **not a wager**, and it **never predicts you specifically** — only the field you stand in. Anonymous: no account, no name; questions are remembered, people are not.
 
-First seed domain: **relationships / marriage outcomes.**
+**Odds only, never advice — by design and for liability.** The oracle states the odds for the field; it never tells anyone what to do, never uses the second person in a verdict, and always carries the disclaimer. That guardrail is enforced in the grounded step's system prompt, not just convention.
 
 ---
 
-## The pipeline (five parts, plus a paywall in front)
+## The pipeline (plus a paywall in front)
 
 0. **Access** (`lib/access.js`) — runs before anything else, on every request, no LLM calls. Checks free-taste / pack balance / subscription cap and consumes the unit if eligible; if not, the request stops here with a paywall or a rest message. See "Payment & usage caps" below.
-1. **The Gate** (`lib/gate.js`) — runs first in the actual pipeline, on every question that clears Access, cheaply (Claude Haiku). Enforces the three hard walls (self-harm, harm to others, minors → refuse) and decides `SPEAK` vs `STAY_SILENT`. Silence is a feature.
-2. **The Eyes** (`lib/eyes.js`) — a light live-pulse read via **Grok** for current signal. Non-fatal if it fails.
-3. **Reason + Reconcile** (`lib/reason.js`) — the quality-critical step (Claude Sonnet). Weighs the seed memory's real base rates against the question, produces honest ranked odds + a confidence/thinness label. Fires only *after* the gate says SPEAK.
-4. **Render + Mirror** (`lib/render.js`) — cheap phrasing (Haiku). Turns odds into a verdict card and picks **the Mirror**: one true, wry stat (chosen from the memory's `mirror_stats`, never invented) that reframes the question.
-5. **The Face** (`app/page.js`) — the mobile UI: ask box → verdict card, with honest silence and wall states.
+1. **The Gate** (`lib/gate.js`) — runs first in the actual pipeline, on every question that clears Access, cheaply (Claude Haiku). Enforces the three hard walls (self-harm, harm to others, minors → refuse), decides `SPEAK` vs `STAY_SILENT`, and emits a `topic` hint (a curated domain, or `general`). Domain-agnostic: it speaks for any field with real base-rate data, stays silent on the unknowable. Silence is a feature.
+2. **Grounded Reason** (`lib/ground.js`) — the brain (Claude Sonnet 5 with the **live `web_search` server tool**). For any question that clears the Gate, it searches the web for real base rates for the field, then produces honest ranked odds + a confidence/thinness label, or stays silent if it can't find real data. It **never invents numbers**, and its system prompt hard-codes the odds-only / never-advice / field-not-person rules. When the Gate's topic maps to a curated domain, that domain's vetted reference data (below) is injected alongside the live search.
+3. **Render + Mirror** (`lib/render.js`) — cheap phrasing (Haiku). Turns odds into a verdict card and picks **the Mirror**: one true, wry stat (chosen from the candidates the grounded step surfaced from real sources, never invented) that reframes the question.
+4. **The Face** (`app/page.js`) — the mobile UI: ask box → verdict card, with honest silence and wall states.
 
-Memory lives in `data/relationships.json` — base rates cited to specific named studies/researchers (Wolfinger's marriage-age research, Gottman's Four Horsemen, Kansas State's financial-conflict study, Stanford's HCMST project, IFS's cohabitation research, etc.), not a vague source list. Where the underlying research is genuinely mixed or a popular figure isn't traceable to one clean current dataset, the file says so explicitly rather than presenting false precision — see each baseline/factor's own `note` and `source`. This is the moat: the odds are only worth anything if they're honest, which means being honest about the data's limits too. Static by design (marriage/divorce demographics don't move week to week) — there is no live statistics API. `lib/eyes.js`'s Grok call is *not* a live data feed either; it's a plain LLM recall, not a search — see its own comment for that caveat.
+**Curated reference data** lives in `data/<topic>.json`. The seed domain, `data/relationships.json`, cites base rates to specific named studies/researchers (Wolfinger's marriage-age research, Gottman's Four Horsemen, Kansas State's financial-conflict study, Stanford's HCMST project, IFS's cohabitation research, etc.), with explicit caveats where the research is mixed. It's injected into the grounded step as pre-vetted context *plus* live search, so relationship questions get the best of both. Every other question is answered from live search alone. To give a new domain curated grounding, add `data/<topic>.json`, register it in the route's `CURATED` map, and add the topic to the Gate's `topic` hint.
+
+> **Legacy:** `lib/eyes.js` (Grok "pulse") and `lib/reason.js` (memory-only Sonnet) are the previous relationships-only path. The active pipeline is Gate → Grounded Reason → Render; those two files are retained but no longer on the request path.
 
 ## Cost shape
-- Gate + render use a small model; the expensive brain (Sonnet) fires once per *spoken* verdict, behind the gate.
-- A refused/silent question costs almost nothing.
-- Estimated compute per spoken verdict: single-digit cents. The real cost enemy is payment-processing flat fees — sell in packs, not single dollars.
+- Gate + render use a small model; the grounded brain (Sonnet 5 + web search) fires once per *spoken* verdict, behind the gate. Web search adds a per-search cost on top of tokens.
+- A refused/silent question costs almost nothing (no search runs).
+- Estimated compute per spoken verdict: single-digit-to-low-double-digit cents (web search is the new variable cost). The real cost enemy is still payment-processing flat fees — sell in packs, not single dollars.
 
 ---
 
@@ -61,10 +62,11 @@ npm run db:init-insights
 
 ## Model choices (edit in `lib/models.js`)
 - Gate / Render: `claude-haiku-4-5-20251001`
-- Reason: `claude-sonnet-4-5`
-- Pulse: `grok-2-latest`
+- Grounded Reason: `claude-sonnet-5` — must be a model that supports the `web_search_20260209` server tool
+- Reason (legacy, unused): `claude-sonnet-4-5`
+- Pulse (legacy, unused): `grok-2-latest`
 
-If any model string is out of date, update it there — it's the single source of truth. Confirm current model names in each provider's docs.
+If any model string is out of date, update it there — it's the single source of truth. Confirm current model names in each provider's docs. The grounded step uses Anthropic's server-side web search, so the search runs on Anthropic's infrastructure — no extra network egress or search-API key is needed here.
 
 ## The rules baked in (do not remove lightly)
 - **Field, not person.** Never predicts the individual.
@@ -124,5 +126,12 @@ curl -X POST https://your-app.vercel.app/api/insights/keys \
 ```
 The plaintext key is shown exactly once — only its hash is stored.
 
-## Next domains
-Add a new `data/<domain>.json` in the same shape (`baselines`, `factors`, `mirror_stats`) and register it in `app/api/verdict/route.js`'s `MEMORY` map. The gate already handles unknown domains gracefully. If the domain has coordinate-worthy fields, add a matching entry to `DOMAIN_SCHEMAS` in `lib/insightsExtract.js` so Insights can bucket it too — optional, Insights degrades gracefully (no coordinates) for domains without a schema.
+## Any question, and curated domains
+
+Any question is answerable out of the box — the grounded step searches live for whatever field the question is about, and stays honestly silent when it can't find real data. You don't need to add anything for a new topic to work.
+
+Adding **curated** grounding for a domain (vetted reference data injected alongside live search) is optional and makes that domain's answers stronger:
+1. Add `data/<topic>.json` (any shape — it's passed to the model as JSON context; the relationships file's `baselines`/`factors`/`mirror_stats` shape is a good template).
+2. Register it in `app/api/verdict/route.js`'s `CURATED` map, keyed by topic.
+3. Add the topic to the Gate's `topic` hint in `lib/gate.js` so questions route to it.
+4. Optional: add a matching entry to `DOMAIN_SCHEMAS` in `lib/insightsExtract.js` so Insights can bucket that domain's coordinates too (Insights degrades gracefully — no coordinates — for domains without a schema).
