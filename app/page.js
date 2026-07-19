@@ -92,6 +92,19 @@ export default function Home() {
     setCheckoutBusy(null);
   }
 
+  async function redeemCode(code) {
+    const res = await fetch("/api/redeem", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ code }),
+    });
+    const data = await res.json();
+    if (data.status === "ok") {
+      setBilling(data.billing);
+    }
+    return data;
+  }
+
   async function openPortal() {
     try {
       const res = await fetch("/api/portal", { method: "POST" });
@@ -135,6 +148,7 @@ export default function Home() {
           busy={checkoutBusy}
           onSelect={startCheckout}
           freeTasteResetsInDays={billing.freeTasteResetsInDays}
+          onRedeem={redeemCode}
         />
       )}
 
@@ -165,6 +179,7 @@ export default function Home() {
           <p className="fineprint">
             No account. No name. Questions are remembered; people are not.
           </p>
+          <PromoRedeem onRedeem={redeemCode} />
         </section>
       )}
 
@@ -175,6 +190,7 @@ export default function Home() {
           tiers={billing?.tiers}
           checkoutBusy={checkoutBusy}
           onSelectTier={startCheckout}
+          onRedeem={redeemCode}
         />
       )}
 
@@ -194,6 +210,9 @@ export default function Home() {
 
 function BillingLine({ billing, onManage }) {
   if (!billing) return null;
+  if (billing.unlimited) {
+    return <p className="balanceline">unlimited access</p>;
+  }
   const sub = billing.subscription;
   if (sub?.active) {
     return (
@@ -216,7 +235,7 @@ function BillingLine({ billing, onManage }) {
   return null;
 }
 
-function Pricing({ tiers, busy, onSelect, freeTasteResetsInDays }) {
+function Pricing({ tiers, busy, onSelect, freeTasteResetsInDays, onRedeem }) {
   if (!tiers) return null;
   return (
     <section className="pricing">
@@ -246,7 +265,59 @@ function Pricing({ tiers, busy, onSelect, freeTasteResetsInDays }) {
           </div>
         ))}
       </div>
+      <PromoRedeem onRedeem={onRedeem} />
     </section>
+  );
+}
+
+function PromoRedeem({ onRedeem }) {
+  const [open, setOpen] = useState(false);
+  const [code, setCode] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState(null); // { ok: boolean, text: string }
+
+  if (!onRedeem) return null;
+
+  async function submit(e) {
+    e.preventDefault();
+    if (!code.trim() || busy) return;
+    setBusy(true);
+    setMsg(null);
+    const data = await onRedeem(code.trim());
+    if (data.status === "ok") {
+      setMsg({ ok: true, text: "Code redeemed." });
+      setCode("");
+    } else {
+      setMsg({ ok: false, text: data.message || "That code didn't work." });
+    }
+    setBusy(false);
+  }
+
+  if (!open) {
+    return (
+      <button type="button" className="promolink" onClick={() => setOpen(true)}>
+        have a code?
+      </button>
+    );
+  }
+
+  return (
+    <form className="promoform" onSubmit={submit}>
+      <div className="promorow">
+        <input
+          className="promoinput"
+          value={code}
+          onChange={(e) => setCode(e.target.value)}
+          placeholder="promo code"
+          autoFocus
+          disabled={busy}
+        />
+        <button className="promobtn" type="submit" disabled={busy || !code.trim()}>
+          {busy ? "…" : "redeem"}
+        </button>
+      </div>
+      {msg && <p className={msg.ok ? "promomsg promomsg-ok" : "promomsg promomsg-error"}>{msg.text}</p>}
+    </form>
   );
 }
 
@@ -284,7 +355,7 @@ function MirrorBlock({ mirror }) {
   );
 }
 
-function Verdict({ result, onAgain, tiers, checkoutBusy, onSelectTier }) {
+function Verdict({ result, onAgain, tiers, checkoutBusy, onSelectTier, onRedeem }) {
   if (result.status === "spoken") {
     return (
       <section className="card spoken">
@@ -344,6 +415,7 @@ function Verdict({ result, onAgain, tiers, checkoutBusy, onSelectTier }) {
           busy={checkoutBusy}
           onSelect={onSelectTier}
           freeTasteResetsInDays={result.freeTasteResetsInDays}
+          onRedeem={onRedeem}
         />
         <button className="again" onClick={onAgain}>back</button>
       </section>
@@ -423,6 +495,31 @@ function Styles() {
       .cast:disabled{opacity:.5;cursor:default}
       .cast:not(:disabled):active{transform:translateY(1px)}
       .fineprint{text-align:center;color:#7c8394;font-size:13px;margin-top:14px;letter-spacing:.01em}
+
+      .promolink{
+        display:block;margin:14px auto 0;background:none;border:none;
+        color:#7c8394;font-family:'Newsreader',serif;font-style:italic;
+        font-size:13px;text-decoration:underline;cursor:pointer;padding:0;
+      }
+      .promoform{margin-top:14px}
+      .promorow{display:flex;gap:8px}
+      .promoinput{
+        flex:1 1 auto;background:rgba(243,239,231,.04);
+        border:1px solid var(--ink2);border-radius:10px;
+        color:var(--porcelain);font-family:'Newsreader',serif;font-size:14px;
+        padding:10px 12px;outline:none;min-width:0;
+      }
+      .promoinput:focus{border-color:var(--leaf-soft)}
+      .promoinput::placeholder{color:#7c8394}
+      .promobtn{
+        flex:0 0 auto;padding:10px 16px;border:1px solid var(--leaf-soft);border-radius:10px;
+        background:transparent;color:var(--leaf-soft);font-family:'Fraunces',serif;
+        font-size:13px;letter-spacing:.04em;cursor:pointer;
+      }
+      .promobtn:disabled{opacity:.5;cursor:default}
+      .promomsg{font-size:12.5px;margin:8px 0 0;font-style:italic}
+      .promomsg-ok{color:var(--leaf-soft)}
+      .promomsg-error{color:#c98a6a}
 
       .balanceline{
         text-align:center;color:#9a927e;font-size:13px;margin:14px 0 0;
