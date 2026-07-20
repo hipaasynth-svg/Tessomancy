@@ -7,6 +7,7 @@ import {
   getOrCreateDeviceToken,
   getCustomerId,
   checkAndConsumeAccess,
+  refundAccess,
   publicTiers,
   getFreeTasteResetsInDays,
 } from "../../../lib/access.js";
@@ -69,7 +70,11 @@ export async function POST(req) {
     const gate = await runGate(question);
     const domain = gate.topic; // "relationships" | "general" — used for logging + curated routing
 
+    // No verdict means no charge: every non-spoken exit below refunds the
+    // unit of access consumed above, before responding. Nobody spends their
+    // one free weekly reading — or a paid verdict — on silence.
     if (gate.decision === "BLOCK") {
+      await refundAccess(access, { deviceToken, customerId });
       waitUntil(logBlocked({ domain, wallType: gate.wall, region }));
       return json({
         status: "wall",
@@ -78,12 +83,14 @@ export async function POST(req) {
       });
     }
     if (gate.decision === "STAY_SILENT") {
+      await refundAccess(access, { deviceToken, customerId });
       waitUntil(logSilent({ domain, region }));
       return json({
         status: "silent",
         reason:
           gate.reason ||
           "The world hasn't shown the oracle enough to speak to this. She answers the field, not the fate of one person.",
+        hint: "She reads fields, not fates. Describe the situation — ages, timelines, the kind of decision — rather than one person's name, and ask again. This reading cost you nothing.",
       });
     }
 
@@ -95,10 +102,17 @@ export async function POST(req) {
     const grounded = await runGroundedReason(question, referenceData, gate.reframedQuestion);
 
     if (!grounded.speak) {
+      // Surface WHY in the server logs — silence caused by an API error or a
+      // parse failure must be distinguishable from a genuine lack of data.
+      if (grounded.error) {
+        console.error("grounded reason failed (returned silent)", grounded.error);
+      }
+      await refundAccess(access, { deviceToken, customerId });
       waitUntil(logSilent({ domain, region }));
       return json({
         status: "silent",
         reason: "The oracle looked — searched the world for real numbers on this — but could not find honest odds to stand behind.",
+        hint: "Try widening it to the field: 'what are the odds that couples/startups/patients like this…' rather than a single person's outcome. This reading cost you nothing.",
       });
     }
 

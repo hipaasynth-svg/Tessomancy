@@ -385,7 +385,8 @@ function Verdict({ result, onAgain, tiers, checkoutBusy, onSelectTier, onRedeem 
       <section className="card silent">
         <div className="silentmark">—</div>
         <p className="silenttext">{result.reason}</p>
-        <button className="again" onClick={onAgain}>ask another</button>
+        {result.hint && <p className="silenthint">{result.hint}</p>}
+        <button className="again" onClick={onAgain}>rephrase and ask again</button>
       </section>
     );
   }
@@ -604,6 +605,7 @@ function Styles() {
       }
       .silentmark{font-size:34px;color:var(--leaf-soft);text-align:center;line-height:1}
       .silenttext{font-size:18px;line-height:1.55;text-align:center;color:#d4cdbd;margin:14px 4px 4px;font-style:italic}
+      .silenthint{font-size:14px;line-height:1.55;text-align:center;color:#9a927e;margin:14px 8px 0}
       .walltext{font-size:17px;line-height:1.6;color:#e3dccb;margin:2px 2px 4px}
       .card.silent .again, .card.wall .again{border-color:#39414f;color:#b8b1a1}
       .card.wall .tier{border-color:#39414f;background:rgba(243,239,231,.03)}
