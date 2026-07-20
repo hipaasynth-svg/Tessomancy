@@ -92,7 +92,7 @@ export async function POST(req) {
     // grounded in real sources, or stays silent if it can't find any. Odds
     // about the field only — never advice, never about the individual.
     const referenceData = CURATED[domain] || null;
-    const grounded = await runGroundedReason(question, referenceData);
+    const grounded = await runGroundedReason(question, referenceData, gate.reframedQuestion);
 
     if (!grounded.speak) {
       waitUntil(logSilent({ domain, region }));
