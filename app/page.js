@@ -5,18 +5,15 @@ export default function Home() {
   const [question, setQuestion] = useState("");
   const [state, setState] = useState("idle"); // idle | asking | done
   const [result, setResult] = useState(null);
-  const [billing, setBilling] = useState(null); // null while loading
+  const [billing, setBilling] = useState(null);
   const [purchaseNotice, setPurchaseNotice] = useState(null);
-  const [checkoutBusy, setCheckoutBusy] = useState(null); // tier key currently launching, or null
+  const [checkoutBusy, setCheckoutBusy] = useState(null);
+  const [feed, setFeed] = useState([]);
 
   const fetchStatus = useCallback(async () => {
     try {
       const res = await fetch("/api/status");
       const data = await res.json();
-      // A failed status check must never be mistaken for "no access" — that
-      // renders a pricing screen with no tier data and goes silently blank.
-      // Leave billing as null (falls back to showing the ask box) so the
-      // per-request check in /api/verdict stays the real gate either way.
       if (!res.ok || data.status === "error" || typeof data.hasAccess !== "boolean") {
         return null;
       }
@@ -39,6 +36,7 @@ export default function Home() {
     } else {
       fetchStatus();
     }
+    fetchFeed();
 
     async function pollAfterPurchase() {
       for (let i = 0; i < 6; i++) {
@@ -54,10 +52,21 @@ export default function Home() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  async function fetchFeed() {
+    try {
+      const res = await fetch("/api/feed");
+      const data = await res.json();
+      if (Array.isArray(data)) setFeed(data.slice(0, 8));
+    } catch {
+      // silent
+    }
+  }
+
   async function ask() {
     if (question.trim().length < 3 || state === "asking") return;
     setState("asking");
     setResult(null);
+    const start = Date.now();
     try {
       const res = await fetch("/api/verdict", {
         method: "POST",
@@ -65,8 +74,14 @@ export default function Home() {
         body: JSON.stringify({ question }),
       });
       const data = await res.json();
+      const elapsed = Date.now() - start;
+      const remain = Math.max(0, 2200 - elapsed);
+      if (remain > 0) await new Promise((r) => setTimeout(r, remain));
       setResult(data);
     } catch {
+      const elapsed = Date.now() - start;
+      const remain = Math.max(0, 2200 - elapsed);
+      if (remain > 0) await new Promise((r) => setTimeout(r, remain));
       setResult({ status: "error", message: "The oracle could not be reached." });
     }
     setState("done");
@@ -87,7 +102,7 @@ export default function Home() {
         return;
       }
     } catch {
-      // fall through to reset busy state below
+      // fall through
     }
     setCheckoutBusy(null);
   }
@@ -111,7 +126,7 @@ export default function Home() {
       const data = await res.json();
       if (data.url) window.location.href = data.url;
     } catch {
-      // no-op — the manage link just does nothing if the portal can't open
+      // no-op
     }
   }
 
@@ -119,6 +134,7 @@ export default function Home() {
     setState("idle");
     setResult(null);
     setQuestion("");
+    fetchFeed();
   }
 
   const restingUntilRenewal = billing?.subscription?.hardCapped === true;
@@ -152,7 +168,7 @@ export default function Home() {
         />
       )}
 
-      {state !== "done" && !restingUntilRenewal && !showPricing && (
+      {state !== "done" && !restingUntilRenewal && !showPricing && state !== "asking" && (
         <section className="asker">
           <p className="prompt">
             Only facts, never novelty. Ask a high-stakes question about any part of
@@ -183,6 +199,8 @@ export default function Home() {
         </section>
       )}
 
+      {state === "asking" && <GazeStage />}
+
       {state === "done" && result && (
         <Verdict
           result={result}
@@ -192,6 +210,26 @@ export default function Home() {
           onSelectTier={startCheckout}
           onRedeem={redeemCode}
         />
+      )}
+
+      {(state === "idle" || state === "result") && feed.length > 0 && (
+        <section className="collective">
+          <div className="collectiveRule">
+            <span className="collectiveLabel">The Collective</span>
+          </div>
+          <div className="collectiveGrid">
+            {feed.map((item, idx) => (
+              <div className="collectiveCard" key={idx}>
+                <div className="collectiveTop">
+                  <span className="collectiveTopic">{item.topic || "fate"}</span>
+                  <span className="collectiveOdds">{item.odds ?? "--"}%</span>
+                </div>
+                <p className="collectiveQ">{item.question}</p>
+                {item.line && <p className="collectiveLine">{item.line}</p>}
+              </div>
+            ))}
+          </div>
+        </section>
       )}
 
       <footer className="foot">
@@ -207,6 +245,83 @@ export default function Home() {
     </main>
   );
 }
+
+/* ---------- NEW / ENHANCED COMPONENTS ---------- */
+
+function GazeStage() {
+  return (
+    <section className="gazestage" aria-live="polite">
+      <div className="gazemoon">
+        <svg width="100" height="100" viewBox="0 0 22 22" aria-hidden="true">
+          <mask id="gazeMoonMask">
+            <rect width="22" height="22" fill="white" />
+            <circle cx="14" cy="8" r="7.5" fill="black" />
+          </mask>
+          <circle cx="11" cy="11" r="8.5" fill="var(--gold)" mask="url(#gazeMoonMask)" />
+        </svg>
+      </div>
+      <p className="gazetext">reading the leaves…</p>
+      <div className="gazeswirl" aria-hidden="true" />
+    </section>
+  );
+}
+
+function MirrorBlock({ mirror }) {
+  const [displayed, setDisplayed] = useState("");
+  const [shareState, setShareState] = useState("idle");
+  const [done, setDone] = useState(false);
+
+  useEffect(() => {
+    if (!mirror) return;
+    setDisplayed("");
+    setDone(false);
+    let i = 0;
+    const timer = setInterval(() => {
+      setDisplayed(mirror.slice(0, i + 1));
+      i++;
+      if (i >= mirror.length) {
+        clearInterval(timer);
+        setDone(true);
+      }
+    }, 24);
+    return () => clearInterval(timer);
+  }, [mirror]);
+
+  async function share() {
+    const text = `"${mirror}"\n\n— Tessomancy, the odds, honestly`;
+    const url = "https://tessomancy.com";
+    if (typeof navigator !== "undefined" && navigator.share) {
+      try {
+        await navigator.share({ text, url });
+      } catch {
+        // user cancelled
+      }
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(`${text}\n${url}`);
+      setShareState("copied");
+      setTimeout(() => setShareState("idle"), 2000);
+    } catch {
+      // clipboard unavailable
+    }
+  }
+
+  return (
+    <div className="mirror">
+      <span className="mlabel">the mirror</span>
+      <p>
+        {displayed}
+        {!done && <span className="cursor">|</span>}
+      </p>
+      <button className="sharebtn" onClick={share}>
+        {shareState === "copied" ? "copied" : "share this"}
+      </button>
+    </div>
+  );
+}
+
+/* ---------- EXISTING COMPONENTS (preserved exact logic) ---------- */
 
 function BillingLine({ billing, onManage }) {
   if (!billing) return null;
@@ -230,7 +345,7 @@ function BillingLine({ billing, onManage }) {
     );
   }
   if (billing.freeTasteAvailable) {
-    return <p className="balanceline">one free reading this week</p>;
+ return <p className="balanceline">one free reading this week</p>;
   }
   return null;
 }
@@ -251,7 +366,7 @@ function Pricing({ tiers, busy, onSelect, freeTasteResetsInDays, onRedeem }) {
       <div className="tiers">
         {tiers.map((t) => (
           <div className="tier" key={t.key}>
-            <div className="tiername">{t.name}</div>
+ <div className="tiername">{t.name}</div>
             <div className="tierprice">
               ${(t.amount / 100).toFixed(2)}
               {t.mode === "subscription" ? <span className="tierper">/mo</span> : null}
@@ -260,7 +375,7 @@ function Pricing({ tiers, busy, onSelect, freeTasteResetsInDays, onRedeem }) {
               {t.mode === "subscription" ? "unlimited within fair use" : `${t.verdicts} verdicts`}
             </div>
             <button className="tierbtn" disabled={busy === t.key} onClick={() => onSelect(t.key)}>
-              {busy === t.key ? "opening…" : "choose"}
+ {busy === t.key ? "opening…" : "choose"}
             </button>
           </div>
         ))}
@@ -274,7 +389,7 @@ function PromoRedeem({ onRedeem }) {
   const [open, setOpen] = useState(false);
   const [code, setCode] = useState("");
   const [busy, setBusy] = useState(false);
-  const [msg, setMsg] = useState(null); // { ok: boolean, text: string }
+  const [msg, setMsg] = useState(null);
 
   if (!onRedeem) return null;
 
@@ -321,62 +436,68 @@ function PromoRedeem({ onRedeem }) {
   );
 }
 
-function MirrorBlock({ mirror }) {
-  const [shareState, setShareState] = useState("idle"); // idle | copied
-
-  async function share() {
-    const text = `"${mirror}"\n\n— Tessomancy, the odds, honestly`;
-    const url = "https://tessomancy.com";
-    if (typeof navigator !== "undefined" && navigator.share) {
-      try {
-        await navigator.share({ text, url });
-      } catch {
-        // user cancelled — not an error
-      }
-      return;
-    }
-    try {
-      await navigator.clipboard.writeText(`${text}\n${url}`);
-      setShareState("copied");
-      setTimeout(() => setShareState("idle"), 2000);
-    } catch {
-      // clipboard unavailable — nothing more we can do
-    }
-  }
-
-  return (
-    <div className="mirror">
-      <span className="mlabel">the mirror</span>
-      <p>{mirror}</p>
-      <button className="sharebtn" onClick={share}>
-        {shareState === "copied" ? "copied" : "share this"}
-      </button>
-    </div>
-  );
-}
-
 function Verdict({ result, onAgain, tiers, checkoutBusy, onSelectTier, onRedeem }) {
   if (result.status === "spoken") {
     return (
       <section className="card spoken">
-        {result.softCapNotice && <p className="softcap">{result.softCapNotice}</p>}
-        <div className="conf" data-c={result.confidence}>{confLabel(result.confidence)}</div>
-        <h2 className="headline">{result.headline}</h2>
+        {result.softCapNotice && (
+          <p className="softcap reveal" style={{ animationDelay: "0ms" }}>{result.softCapNotice}</p>
+        )}
+        <div className="conf reveal" style={{ animationDelay: "60ms" }} data-c={result.confidence}>
+          {confLabel(result.confidence)}
+        </div>
+        <h2 className="headline reveal" style={{ animationDelay: "160ms" }}>
+          {result.headline}
+ </h2>
         <ul className="odds">
           {result.outcomes.map((o, i) => (
-            <li key={i}>
+            <li className="reveal" key={i} style={{ animationDelay: `${260 + i * 100}ms` }}>
               <div className="bar-row">
                 <span className="olabel">{o.label}</span>
                 <span className="opct">{o.probability}%</span>
               </div>
-              <div className="track"><div className="fill" style={{ width: `${o.probability}%` }} /></div>
+              <div className="track">
+                <div
+                  className="fill"
+                  style={{
+                    width: `${o.probability}%`,
+                    animationDelay: `${360 + i * 100}ms`,
+ }}
+                />
+              </div>
             </li>
           ))}
         </ul>
-        {result.basis && <p className="basis">{result.basis}</p>}
-        <MirrorBlock mirror={result.mirror} />
-        <p className="disclaimer">{result.disclaimer}</p>
-        <button className="again" onClick={onAgain}>ask another</button>
+        {result.basis && (
+          <p
+            className="basis reveal"
+            style={{ animationDelay: `${280 + result.outcomes.length * 100 + 80}ms` }}
+          >
+ {result.basis}
+          </p>
+        )}
+        <div
+          className="reveal"
+          style={{
+            animationDelay: `${280 + result.outcomes.length * 100 + 180}ms`,
+            animationFillMode: "both",
+          }}
+        >
+          <MirrorBlock mirror={result.mirror} />
+        </div>
+        <p
+          className="disclaimer reveal"
+          style={{ animationDelay: `${280 + result.outcomes.length * 100 + 340}ms` }}
+        >
+          {result.disclaimer}
+        </p>
+        <button
+          className="again reveal"
+          style={{ animationDelay: `${280 + result.outcomes.length * 100 + 460}ms` }}
+          onClick={onAgain}
+        >
+          ask another
+        </button>
       </section>
     );
   }
@@ -436,6 +557,8 @@ function confLabel(c) {
   return "moderate reading";
 }
 
+/* ---------- STYLES (your existing CSS + new animations) ---------- */
+
 function Styles() {
   return (
     <style>{`
@@ -470,6 +593,22 @@ function Styles() {
       .purchasenotice{
         text-align:center;color:var(--gold);font-style:italic;font-size:14px;
         margin:0 0 16px;letter-spacing:.02em;
+      }
+
+      /* Gaze Stage */
+      .gazestage{
+        margin-top:10vh;display:flex;flex-direction:column;align-items:center;gap:22px;
+        animation: gazeFade .7s ease both;
+      }
+      .gazemoon svg{animation: moonBob 3s ease-in-out infinite, moonSpin 12s linear infinite;}
+      .gazetext{
+        font-family:'Fraunces',serif;font-size:15px;letter-spacing:.18em;text-transform:lowercase;
+        color:var(--leaf-soft);animation: gazePulse 2s ease-in-out infinite;
+      }
+      .gazeswirl{
+        width:140px;height:140px;border-radius:50%;
+        background: conic-gradient(from 0deg, transparent, rgba(176,138,79,.18), transparent);
+        opacity:.35;animation: spin 3s linear infinite;filter:blur(14px);margin-top:4px;
       }
 
       .asker{margin-top:8px}
@@ -549,13 +688,16 @@ function Styles() {
       .tierbtn:disabled{opacity:.5;cursor:default}
       .tierbtn:not(:disabled):active{transform:translateY(1px)}
 
+      /* Result card reveal */
       .card{
         margin-top:6px;background:linear-gradient(180deg,#f6f2ea 0%,#efe9dd 100%);
         color:var(--ink);border-radius:18px;padding:24px 22px 20px;
         box-shadow:0 20px 60px rgba(0,0,0,.45), 0 2px 0 rgba(255,255,255,.4) inset;
         animation:rise .5s cubic-bezier(.2,.7,.2,1) both;
       }
+      .reveal{animation: rise .55s cubic-bezier(.2,.7,.2,1) both; opacity:0;}
       @keyframes rise{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:none}}
+      
       .softcap{
         font-style:italic;color:var(--tea);font-size:14px;line-height:1.5;
         margin:0 0 16px;padding-bottom:14px;border-bottom:1px solid var(--line);
@@ -584,7 +726,8 @@ function Styles() {
       .mirror{margin:20px 0 6px;padding:16px 16px 14px;background:rgba(63,92,74,.08);
         border-left:3px solid var(--leaf);border-radius:6px}
       .mlabel{font-family:'Fraunces',serif;font-size:11px;letter-spacing:.2em;text-transform:uppercase;color:var(--tea)}
-      .mirror p{margin:6px 0 0;font-size:16px;line-height:1.5;color:var(--ink);font-style:italic}
+      .mirror p{margin:6px 0 0;font-size:16px;line-height:1.5;color:var(--ink);font-style:italic;min-height:1.5em;}
+      .cursor{display:inline-block;width:1px;background:var(--tea);animation:blink 1.1s step-end infinite;margin-left:1px;}
       .sharebtn{
         margin-top:10px;padding:6px 0;border:none;background:none;
         color:var(--tea);font-family:'Fraunces',serif;font-size:12px;
@@ -611,12 +754,59 @@ function Styles() {
       .card.wall .tier{border-color:#39414f;background:rgba(243,239,231,.03)}
       .card.wall .tiername{color:#e3dccb}
 
+      /* Collective Feed */
+      .collective{margin-top:48px;margin-bottom:10px}
+      .collectiveRule{
+        display:flex;align-items:center;gap:14px;margin-bottom:20px;
+      }
+      .collectiveRule::before,.collectiveRule::after{
+        content:'';flex:1;height:1px;background:rgba(201,192,173,.15);
+      }
+      .collectiveLabel{
+        font-family:'Fraunces',serif;font-size:11px;letter-spacing:.2em;text-transform:uppercase;
+        color:#7c8394;white-space:nowrap;
+      }
+      .collectiveGrid{
+        display:flex;flex-direction:column;gap:12px;
+      }
+      .collectiveCard{
+        background:rgba(243,239,231,.03);border:1px solid rgba(201,192,173,.08);
+        border-radius:14px;padding:14px 16px;transition:background .2s ease;
+      }
+      .collectiveCard:hover{background:rgba(243,239,231,.055)}
+      .collectiveTop{
+        display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;
+      }
+      .collectiveTopic{
+        font-family:'Fraunces',serif;font-size:10px;letter-spacing:.18em;text-transform:uppercase;
+        color:var(--leaf-soft);
+      }
+      .collectiveOdds{
+        font-family:'Fraunces',serif;font-weight:600;font-size:16px;color:#e3dccb;
+      }
+      .collectiveQ{
+        color:#9a927e;font-size:13px;line-height:1.45;margin:0;
+        overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;
+      }
+      .collectiveLine{
+        color:#7c8394;font-size:12px;line-height:1.45;margin:8px 0 0;font-style:italic;
+        border-left:2px solid rgba(63,92,74,.35);padding-left:10px;
+      }
+
       .foot{margin-top:auto;padding-top:26px;text-align:center}
       .moon{display:block;margin:0 auto 10px;opacity:.85}
       .footline{color:#5f6675;font-size:12.5px;letter-spacing:.02em;margin:0}
 
+      @keyframes gazeFade{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
+      @keyframes gazePulse{0%,100%{opacity:.45}50%{opacity:1}}
+      @keyframes moonBob{0%,100%{transform:translateY(0)}50%{transform:translateY(-6px)}}
+      @keyframes moonSpin{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}
+      @keyframes spin{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}
+      @keyframes blink{0%,100%{opacity:1}50%{opacity:0}}
+
       @media (prefers-reduced-motion:reduce){
-        .card,.fill{animation:none}
+        .card,.fill,.reveal,.gazemoon svg,.gazeswirl{animation:none !important}
+        .cursor{animation:none !important;opacity:0}
       }
     `}</style>
   );
