@@ -39,6 +39,19 @@ export default function Home() {
     }
     fetchFeed();
 
+    // Keep the Collective feed feeling alive: reload it in the background on
+    // a randomized interval, so new readings appear without a hard refresh
+    // and without a predictable, scrapeable cadence.
+    let feedTimer;
+    function scheduleFeedRefresh() {
+      const delay = 40000 + Math.random() * 50000; // 40-90s
+      feedTimer = setTimeout(async () => {
+        await fetchFeed({ silent: true });
+        scheduleFeedRefresh();
+      }, delay);
+    }
+    scheduleFeedRefresh();
+
     async function pollAfterPurchase() {
       for (let i = 0; i < 6; i++) {
         const data = await fetchStatus();
@@ -234,6 +247,7 @@ export default function Home() {
                     <span className="collectiveTopic">{item.topic || "fate"}</span>
                     <span className="collectiveOdds">{item.odds ?? "--"}%</span>
                   </div>
+                  {item.snippet && <p className="collectiveSnippet">{item.snippet}</p>}
                   <div className="collectiveMeta">
                     <span className="collectiveConf" data-c={item.confidence}>
                       {confWord(item.confidence)} reading
@@ -912,6 +926,10 @@ function Styles() {
       }
       .collectiveOdds{
         font-family:'Fraunces',serif;font-weight:600;font-size:16px;color:#e3dccb;
+      }
+      .collectiveSnippet{
+        color:#9a927e;font-size:13px;line-height:1.4;font-style:italic;
+        margin:0 0 8px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
       }
       .collectiveMeta{
         display:flex;justify-content:space-between;align-items:center;
