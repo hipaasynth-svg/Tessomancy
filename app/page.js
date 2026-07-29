@@ -9,6 +9,7 @@ export default function Home() {
   const [purchaseNotice, setPurchaseNotice] = useState(null);
   const [checkoutBusy, setCheckoutBusy] = useState(null);
   const [feed, setFeed] = useState([]);
+  const [feedLoading, setFeedLoading] = useState(true);
 
   const fetchStatus = useCallback(async () => {
     try {
@@ -53,6 +54,7 @@ export default function Home() {
   }, []);
 
   async function fetchFeed() {
+    setFeedLoading(true);
     try {
       const res = await fetch("/api/feed");
       const data = await res.json();
@@ -60,6 +62,7 @@ export default function Home() {
     } catch {
       // silent
     }
+    setFeedLoading(false);
   }
 
   async function ask() {
@@ -212,23 +215,35 @@ export default function Home() {
         />
       )}
 
-      {(state === "idle" || state === "result") && feed.length > 0 && (
+      {(state === "idle" || state === "done") && (feedLoading || feed.length > 0) && (
         <section className="collective">
           <div className="collectiveRule">
             <span className="collectiveLabel">The Collective</span>
           </div>
-          <div className="collectiveGrid">
-            {feed.map((item, idx) => (
-              <div className="collectiveCard" key={idx}>
-                <div className="collectiveTop">
-                  <span className="collectiveTopic">{item.topic || "fate"}</span>
-                  <span className="collectiveOdds">{item.odds ?? "--"}%</span>
+          {feedLoading ? (
+            <p className="collectiveLoading">the collective is stirring…</p>
+          ) : (
+            <div className="collectiveGrid">
+              {feed.map((item, idx) => (
+                <div
+                  className="collectiveCard reveal"
+                  style={{ animationDelay: `${idx * 60}ms` }}
+                  key={idx}
+                >
+                  <div className="collectiveTop">
+                    <span className="collectiveTopic">{item.topic || "fate"}</span>
+                    <span className="collectiveOdds">{item.odds ?? "--"}%</span>
+                  </div>
+                  <div className="collectiveMeta">
+                    <span className="collectiveConf" data-c={item.confidence}>
+                      {confWord(item.confidence)} reading
+                    </span>
+                    {item.loggedAt && <span className="collectiveTime">{timeAgo(item.loggedAt)}</span>}
+                  </div>
                 </div>
-                <p className="collectiveQ">{item.question}</p>
-                {item.line && <p className="collectiveLine">{item.line}</p>}
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>
+          )}
         </section>
       )}
 
@@ -251,19 +266,65 @@ export default function Home() {
 function GazeStage() {
   return (
     <section className="gazestage" aria-live="polite">
-      <div className="gazemoon">
-        <svg width="100" height="100" viewBox="0 0 22 22" aria-hidden="true">
-          <mask id="gazeMoonMask">
-            <rect width="22" height="22" fill="white" />
-            <circle cx="14" cy="8" r="7.5" fill="black" />
-          </mask>
-          <circle cx="11" cy="11" r="8.5" fill="var(--gold)" mask="url(#gazeMoonMask)" />
-        </svg>
+      <div className="gazemirror">
+        <div className="gazering" aria-hidden="true" />
+        <div className="gazemoon">
+          <svg width="100" height="100" viewBox="0 0 22 22" aria-hidden="true">
+            <mask id="gazeMoonMask">
+              <rect width="22" height="22" fill="white" />
+              <circle cx="14" cy="8" r="7.5" fill="black" />
+            </mask>
+            <circle cx="11" cy="11" r="8.5" fill="var(--gold)" mask="url(#gazeMoonMask)" />
+          </svg>
+        </div>
       </div>
       <p className="gazetext">reading the leaves…</p>
-      <div className="gazeswirl" aria-hidden="true" />
     </section>
   );
+}
+
+// A single animated percentage that counts up from 0 to `value` — used for
+// the top outcome on a spoken verdict, so the headline number lands with
+// the same "arriving at truth" motion as the mirror's typewriter reveal.
+function GiantOdds({ value }) {
+  const [display, setDisplay] = useState(0);
+
+  useEffect(() => {
+    const to = Math.round(value);
+    const duration = 1100;
+    let raf;
+    const start = performance.now();
+    function step(now) {
+      const progress = Math.min((now - start) / duration, 1);
+      setDisplay(Math.floor(progress * to));
+      if (progress < 1) raf = requestAnimationFrame(step);
+    }
+    raf = requestAnimationFrame(step);
+    return () => cancelAnimationFrame(raf);
+  }, [value]);
+
+  return (
+    <div className="giantodds">
+      {display}
+      <span className="giantpct">%</span>
+    </div>
+  );
+}
+
+function confWord(c) {
+  if (c === "firm") return "solid";
+  if (c === "thin") return "thin";
+  return "moderate";
+}
+
+function timeAgo(iso) {
+  const diffMs = Date.now() - new Date(iso).getTime();
+  const mins = Math.max(1, Math.round(diffMs / 60000));
+  if (mins < 60) return `${mins}m ago`;
+  const hours = Math.round(mins / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.round(hours / 24);
+  return `${days}d ago`;
 }
 
 function MirrorBlock({ mirror }) {
@@ -437,11 +498,40 @@ function PromoRedeem({ onRedeem }) {
 }
 
 function Verdict({ result, onAgain, tiers, checkoutBusy, onSelectTier, onRedeem }) {
+  const [copied, setCopied] = useState(false);
+
+  async function copyResult() {
+    const topOutcome = topOutcomeOf(result.outcomes);
+    const topLine = topOutcome ? `${Math.round(topOutcome.probability)}% — ${topOutcome.label}` : "";
+    const text = [
+      result.headline,
+      topLine,
+      result.mirror ? `"${result.mirror}"` : null,
+      "Ask your own at tessomancy.com",
+    ]
+      .filter(Boolean)
+      .join("\n\n");
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      // clipboard unavailable
+    }
+  }
+
   if (result.status === "spoken") {
+    const topOutcome = topOutcomeOf(result.outcomes);
     return (
       <section className="card spoken">
         {result.softCapNotice && (
           <p className="softcap reveal" style={{ animationDelay: "0ms" }}>{result.softCapNotice}</p>
+        )}
+        {topOutcome && (
+          <div className="giantwrap reveal" style={{ animationDelay: "20ms" }}>
+            <GiantOdds value={topOutcome.probability} />
+            <div className="giantlabel">{topOutcome.label}</div>
+          </div>
         )}
         <div className="conf reveal" style={{ animationDelay: "60ms" }} data-c={result.confidence}>
           {confLabel(result.confidence)}
@@ -491,13 +581,17 @@ function Verdict({ result, onAgain, tiers, checkoutBusy, onSelectTier, onRedeem 
         >
           {result.disclaimer}
         </p>
-        <button
-          className="again reveal"
+        <div
+          className="cardactions reveal"
           style={{ animationDelay: `${280 + result.outcomes.length * 100 + 460}ms` }}
-          onClick={onAgain}
         >
-          ask another
-        </button>
+          <button className="copybtn" onClick={copyResult}>
+            {copied ? "copied" : "copy result"}
+          </button>
+          <button className="again" onClick={onAgain}>
+            ask another
+          </button>
+        </div>
       </section>
     );
   }
@@ -551,6 +645,11 @@ function Verdict({ result, onAgain, tiers, checkoutBusy, onSelectTier, onRedeem 
   );
 }
 
+function topOutcomeOf(outcomes) {
+  if (!Array.isArray(outcomes) || outcomes.length === 0) return null;
+  return outcomes.reduce((best, o) => (o.probability > best.probability ? o : best));
+}
+
 function confLabel(c) {
   if (c === "firm") return "firm reading";
   if (c === "thin") return "thin reading — hold loosely";
@@ -600,15 +699,23 @@ function Styles() {
         margin-top:10vh;display:flex;flex-direction:column;align-items:center;gap:22px;
         animation: gazeFade .7s ease both;
       }
+      .gazemirror{
+        position:relative;width:180px;height:180px;border-radius:50%;
+        display:flex;align-items:center;justify-content:center;
+        background: radial-gradient(circle at 30% 30%, rgba(176,138,79,.14), rgba(20,24,33,.92) 70%);
+        border:1px solid rgba(255,255,255,.08);
+        box-shadow:0 0 60px rgba(176,138,79,.22), inset 0 0 40px rgba(255,255,255,.03);
+      }
+      .gazering{
+        position:absolute;inset:0;border-radius:50%;
+        background: conic-gradient(from 0deg, transparent 0%, rgba(176,138,79,.32) 20%, transparent 40%, rgba(109,138,118,.26) 60%, transparent 100%);
+        opacity:.4;filter:blur(16px);animation: spin 3s linear infinite;
+      }
+      .gazemoon{position:relative;z-index:1}
       .gazemoon svg{animation: moonBob 3s ease-in-out infinite, moonSpin 12s linear infinite;}
       .gazetext{
         font-family:'Fraunces',serif;font-size:15px;letter-spacing:.18em;text-transform:lowercase;
         color:var(--leaf-soft);animation: gazePulse 2s ease-in-out infinite;
-      }
-      .gazeswirl{
-        width:140px;height:140px;border-radius:50%;
-        background: conic-gradient(from 0deg, transparent, rgba(176,138,79,.18), transparent);
-        opacity:.35;animation: spin 3s linear infinite;filter:blur(14px);margin-top:4px;
       }
 
       .asker{margin-top:8px}
@@ -708,6 +815,16 @@ function Styles() {
         border:1px solid var(--line);border-radius:999px;padding:5px 11px;margin-bottom:14px;
       }
       .conf[data-c="thin"]{color:#9a6a3a;border-color:#d8c19a}
+
+      .giantwrap{text-align:center;margin-bottom:8px}
+      .giantodds{
+        font-family:'Fraunces',serif;font-weight:600;line-height:1;font-size:60px;
+        background:linear-gradient(180deg,var(--ink) 0%,var(--leaf) 100%);
+        -webkit-background-clip:text;background-clip:text;color:transparent;
+      }
+      .giantpct{font-size:.4em;opacity:.55;margin-left:2px}
+      .giantlabel{margin-top:4px;font-size:13px;color:#8a8272;text-transform:lowercase;letter-spacing:.03em}
+
       .headline{
         font-family:'Fraunces',serif;font-weight:600;font-size:25px;line-height:1.25;
         margin:0 0 18px;color:var(--ink);
@@ -741,6 +858,14 @@ function Styles() {
         font-family:'Fraunces',serif;font-size:15px;letter-spacing:.08em;cursor:pointer;
       }
       .again:active{background:rgba(0,0,0,.04)}
+      .cardactions{display:flex;gap:10px;margin-top:18px}
+      .cardactions .again{margin-top:0;flex:1 1 0}
+      .copybtn{
+        flex:1 1 0;padding:13px;border:1px solid var(--line);border-radius:12px;
+        background:transparent;color:var(--tea);font-family:'Fraunces',serif;
+        font-size:15px;letter-spacing:.06em;cursor:pointer;
+      }
+      .copybtn:active{background:rgba(0,0,0,.04)}
 
       .card.silent, .card.wall{
         background:linear-gradient(180deg,#1c2230 0%,#161b26 100%);
@@ -766,6 +891,10 @@ function Styles() {
         font-family:'Fraunces',serif;font-size:11px;letter-spacing:.2em;text-transform:uppercase;
         color:#7c8394;white-space:nowrap;
       }
+      .collectiveLoading{
+        text-align:center;color:#7c8394;font-size:12px;letter-spacing:.14em;
+        text-transform:uppercase;animation: gazePulse 2s ease-in-out infinite;
+      }
       .collectiveGrid{
         display:flex;flex-direction:column;gap:12px;
       }
@@ -784,14 +913,12 @@ function Styles() {
       .collectiveOdds{
         font-family:'Fraunces',serif;font-weight:600;font-size:16px;color:#e3dccb;
       }
-      .collectiveQ{
-        color:#9a927e;font-size:13px;line-height:1.45;margin:0;
-        overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;
+      .collectiveMeta{
+        display:flex;justify-content:space-between;align-items:center;
       }
-      .collectiveLine{
-        color:#7c8394;font-size:12px;line-height:1.45;margin:8px 0 0;font-style:italic;
-        border-left:2px solid rgba(63,92,74,.35);padding-left:10px;
-      }
+      .collectiveConf{font-size:12px;color:#9a927e;font-style:italic}
+      .collectiveConf[data-c="thin"]{color:#9a6a3a}
+      .collectiveTime{font-size:11px;color:#5f6675}
 
       .foot{margin-top:auto;padding-top:26px;text-align:center}
       .moon{display:block;margin:0 auto 10px;opacity:.85}
@@ -805,7 +932,7 @@ function Styles() {
       @keyframes blink{0%,100%{opacity:1}50%{opacity:0}}
 
       @media (prefers-reduced-motion:reduce){
-        .card,.fill,.reveal,.gazemoon svg,.gazeswirl{animation:none !important}
+        .card,.fill,.reveal,.gazemoon svg,.gazering{animation:none !important}
         .cursor{animation:none !important;opacity:0}
       }
     `}</style>
