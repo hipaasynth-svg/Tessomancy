@@ -138,10 +138,12 @@ export async function POST(req) {
 
     return json({
       status: "spoken",
+      understoodQuestion: gate.reframedQuestion || question,
       headline: face.headline,
       outcomes: grounded.outcomes,
       confidence: grounded.confidence,
       basis: grounded.basis,
+      factors: grounded.factors || [],
       mirror: face.mirror,
       disclaimer: DISCLAIMER,
       softCapNotice: access.softCapNotice || null,
