@@ -184,38 +184,17 @@ export default function Home() {
         />
       )}
 
-      {state !== "done" && !restingUntilRenewal && !showPricing && state !== "asking" && (
-        <section className="asker">
-          <p className="prompt">
-            Only facts, never novelty. Ask a high-stakes question about any part of
-            life — love, work, health, money — and the oracle reads the <em>real
-            odds</em> for situations like yours, drawn from live data. Not advice.
-            Never about you specifically — only the field you stand in.
-          </p>
-          <p className="tease">
-            There's a real answer to this — most people guess wrong. You're here
-            because you want it straight.
-          </p>
-          <textarea
-            className="field"
-            rows={3}
-            placeholder="e.g. We married at 24, no prior marriages — will it last? · Do startups in my industry survive five years? · What are the odds this surgery goes without complications?"
-            value={question}
-            onChange={(e) => setQuestion(e.target.value)}
-            disabled={state === "asking"}
-          />
-          <button className="cast" onClick={ask} disabled={state === "asking" || question.trim().length < 3}>
-            {state === "asking" ? "reading the leaves…" : "enlighten me"}
-          </button>
-          <BillingLine billing={billing} onManage={openPortal} />
-          <p className="fineprint">
-            No account. No name. Questions are remembered; people are not.
-          </p>
-          <PromoRedeem onRedeem={redeemCode} />
-        </section>
+      {state !== "done" && !restingUntilRenewal && !showPricing && (
+        <OracleOrb
+          question={question}
+          setQuestion={setQuestion}
+          state={state}
+          onAsk={ask}
+          billing={billing}
+          onManage={openPortal}
+          onRedeem={redeemCode}
+        />
       )}
-
-      {state === "asking" && <GazeStage />}
 
       {state === "done" && result && (
         <Verdict
@@ -277,22 +256,71 @@ export default function Home() {
 
 /* ---------- NEW / ENHANCED COMPONENTS ---------- */
 
-function GazeStage() {
+// The orb: one persistent circular element the asker types into directly.
+// Idle shows the intro copy + input fused beneath the circle; asking swaps
+// the circle's contents to the reading animation and hides the input. This
+// replaces two previously independent pieces (a plain textarea section and
+// a separately-mounted loading circle) with a single agent-like presence.
+function OracleOrb({ question, setQuestion, state, onAsk, billing, onManage, onRedeem }) {
+  const asking = state === "asking";
   return (
-    <section className="gazestage" aria-live="polite">
-      <div className="gazemirror">
-        <div className="gazering" aria-hidden="true" />
-        <div className="gazemoon">
-          <svg width="100" height="100" viewBox="0 0 22 22" aria-hidden="true">
-            <mask id="gazeMoonMask">
-              <rect width="22" height="22" fill="white" />
-              <circle cx="14" cy="8" r="7.5" fill="black" />
-            </mask>
-            <circle cx="11" cy="11" r="8.5" fill="var(--gold)" mask="url(#gazeMoonMask)" />
-          </svg>
+    <section className="orbstage" aria-live="polite">
+      {!asking && (
+        <p className="prompt">
+          Only facts, never novelty. Ask a high-stakes question about any part of
+          life — love, work, health, money — and the oracle reads the <em>real
+          odds</em> for situations like yours, drawn from live data. Not advice.
+          Never about you specifically — only the field you stand in.
+        </p>
+      )}
+      {!asking && (
+        <p className="tease">
+          There's a real answer to this — most people guess wrong. You're here
+          because you want it straight.
+        </p>
+      )}
+
+      <div className="orbwrap">
+        <div className="gazemirror">
+          {asking && <div className="gazering" aria-hidden="true" />}
+          <div className="gazemoon">
+            <svg width="100" height="100" viewBox="0 0 22 22" aria-hidden="true">
+              <mask id="orbMoonMask">
+                <rect width="22" height="22" fill="white" />
+                <circle cx="14" cy="8" r="7.5" fill="black" />
+              </mask>
+              <circle cx="11" cy="11" r="8.5" fill="var(--gold)" mask="url(#orbMoonMask)" />
+            </svg>
+          </div>
         </div>
+
+        {asking ? (
+          <p className="gazetext">reading the leaves…</p>
+        ) : (
+          <>
+            <textarea
+              className="field orbfield"
+              rows={3}
+              placeholder="e.g. We married at 24, no prior marriages — will it last? · Do startups in my industry survive five years? · What are the odds this surgery goes without complications?"
+              value={question}
+              onChange={(e) => setQuestion(e.target.value)}
+            />
+            <button className="cast" onClick={onAsk} disabled={question.trim().length < 3}>
+              enlighten me
+            </button>
+          </>
+        )}
       </div>
-      <p className="gazetext">reading the leaves…</p>
+
+      {!asking && (
+        <>
+          <BillingLine billing={billing} onManage={onManage} />
+          <p className="fineprint">
+            No account. No name. Questions are remembered; people are not.
+          </p>
+          <PromoRedeem onRedeem={onRedeem} />
+        </>
+      )}
     </section>
   );
 }
@@ -541,21 +569,26 @@ function Verdict({ result, onAgain, tiers, checkoutBusy, onSelectTier, onRedeem 
         {result.softCapNotice && (
           <p className="softcap reveal" style={{ animationDelay: "0ms" }}>{result.softCapNotice}</p>
         )}
+        {result.understoodQuestion && (
+          <p className="understood reveal" style={{ animationDelay: "60ms" }}>
+            the oracle heard: <em>{result.understoodQuestion}</em>
+          </p>
+        )}
         {topOutcome && (
-          <div className="giantwrap reveal" style={{ animationDelay: "20ms" }}>
+          <div className="giantwrap reveal" style={{ animationDelay: "140ms" }}>
             <GiantOdds value={topOutcome.probability} />
             <div className="giantlabel">{topOutcome.label}</div>
           </div>
         )}
-        <div className="conf reveal" style={{ animationDelay: "60ms" }} data-c={result.confidence}>
+        <div className="conf reveal" style={{ animationDelay: "220ms" }} data-c={result.confidence}>
           {confLabel(result.confidence)}
         </div>
-        <h2 className="headline reveal" style={{ animationDelay: "160ms" }}>
+        <h2 className="headline reveal" style={{ animationDelay: "320ms" }}>
           {result.headline}
  </h2>
         <ul className="odds">
           {result.outcomes.map((o, i) => (
-            <li className="reveal" key={i} style={{ animationDelay: `${260 + i * 100}ms` }}>
+            <li className="reveal" key={i} style={{ animationDelay: `${420 + i * 100}ms` }}>
               <div className="bar-row">
                 <span className="olabel">{o.label}</span>
                 <span className="opct">{o.probability}%</span>
@@ -565,17 +598,36 @@ function Verdict({ result, onAgain, tiers, checkoutBusy, onSelectTier, onRedeem 
                   className="fill"
                   style={{
                     width: `${o.probability}%`,
-                    animationDelay: `${360 + i * 100}ms`,
+                    animationDelay: `${520 + i * 100}ms`,
  }}
                 />
               </div>
             </li>
           ))}
         </ul>
+        {result.factors && result.factors.length > 0 && (
+          <div
+            className="factors reveal"
+            style={{ animationDelay: `${420 + result.outcomes.length * 100 + 60}ms` }}
+          >
+            <div className="factorsLabel">what's driving it</div>
+            {result.factors.map((f, i) => (
+              <div className="factorRow" key={i}>
+                <span className={`factorDir factorDir-${f.direction}`} aria-hidden="true">
+                  {f.direction === "up" ? "▲" : "▼"}
+                </span>
+                <span className="factorLabel">
+                  {f.label}
+                  {f.note ? ` — ${f.note}` : ""}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
         {result.basis && (
           <p
             className="basis reveal"
-            style={{ animationDelay: `${280 + result.outcomes.length * 100 + 80}ms` }}
+            style={{ animationDelay: `${420 + result.outcomes.length * 100 + 160}ms` }}
           >
  {result.basis}
           </p>
@@ -583,7 +635,7 @@ function Verdict({ result, onAgain, tiers, checkoutBusy, onSelectTier, onRedeem 
         <div
           className="reveal"
           style={{
-            animationDelay: `${280 + result.outcomes.length * 100 + 180}ms`,
+            animationDelay: `${420 + result.outcomes.length * 100 + 260}ms`,
             animationFillMode: "both",
           }}
         >
@@ -591,13 +643,13 @@ function Verdict({ result, onAgain, tiers, checkoutBusy, onSelectTier, onRedeem 
         </div>
         <p
           className="disclaimer reveal"
-          style={{ animationDelay: `${280 + result.outcomes.length * 100 + 340}ms` }}
+          style={{ animationDelay: `${420 + result.outcomes.length * 100 + 420}ms` }}
         >
           {result.disclaimer}
         </p>
         <div
           className="cardactions reveal"
-          style={{ animationDelay: `${280 + result.outcomes.length * 100 + 460}ms` }}
+          style={{ animationDelay: `${420 + result.outcomes.length * 100 + 540}ms` }}
         >
           <button className="copybtn" onClick={copyResult}>
             {copied ? "copied" : "copy result"}
@@ -708,14 +760,16 @@ function Styles() {
         margin:0 0 16px;letter-spacing:.02em;
       }
 
-      /* Gaze Stage */
-      .gazestage{
-        margin-top:10vh;display:flex;flex-direction:column;align-items:center;gap:22px;
-        animation: gazeFade .7s ease both;
-      }
+      /* Oracle Orb */
+      .orbstage{margin-top:4vh;display:flex;flex-direction:column;align-items:center;gap:4px}
+      .prompt{color:#cfc8b8;font-size:16px;line-height:1.55;margin:0 0 18px;width:100%}
+      .prompt em{color:var(--gold);font-style:italic}
+      .tease{color:var(--gold);font-style:italic;font-size:15px;line-height:1.5;margin:0 0 22px;width:100%}
+
+      .orbwrap{width:100%;display:flex;flex-direction:column;align-items:center;animation: gazeFade .7s ease both}
       .gazemirror{
-        position:relative;width:180px;height:180px;border-radius:50%;
-        display:flex;align-items:center;justify-content:center;
+        position:relative;width:180px;height:180px;border-radius:50%;flex:0 0 auto;z-index:2;
+        display:flex;align-items:center;justify-content:center;margin-bottom:-28px;
         background: radial-gradient(circle at 30% 30%, rgba(176,138,79,.14), rgba(20,24,33,.92) 70%);
         border:1px solid rgba(255,255,255,.08);
         box-shadow:0 0 60px rgba(176,138,79,.22), inset 0 0 40px rgba(255,255,255,.03);
@@ -728,14 +782,9 @@ function Styles() {
       .gazemoon{position:relative;z-index:1}
       .gazemoon svg{animation: moonBob 3s ease-in-out infinite, moonSpin 12s linear infinite;}
       .gazetext{
-        font-family:'Fraunces',serif;font-size:15px;letter-spacing:.18em;text-transform:lowercase;
+        margin:12px 0 0;font-family:'Fraunces',serif;font-size:15px;letter-spacing:.18em;text-transform:lowercase;
         color:var(--leaf-soft);animation: gazePulse 2s ease-in-out infinite;
       }
-
-      .asker{margin-top:8px}
-      .prompt{color:#cfc8b8;font-size:16px;line-height:1.55;margin:0 0 18px}
-      .prompt em{color:var(--gold);font-style:italic}
-      .tease{color:var(--gold);font-style:italic;font-size:15px;line-height:1.5;margin:0 0 16px}
 
       .scarcity{color:#9a927e;font-size:13.5px;font-style:italic;margin:0 0 14px;line-height:1.5}
       .field{
@@ -746,6 +795,11 @@ function Styles() {
       }
       .field:focus{border-color:var(--leaf-soft);background:rgba(243,239,231,.06)}
       .field::placeholder{color:#aab2c8}
+      .orbfield{
+        padding-top:40px;border-radius:32px;border-color:rgba(176,138,79,.25);
+        background:radial-gradient(circle at 50% 0%, rgba(176,138,79,.1), rgba(243,239,231,.04) 65%);
+      }
+      .orbfield:focus{border-color:var(--leaf-soft)}
       .cast{
         width:100%;margin-top:14px;padding:16px;border:none;border-radius:14px;
         background:linear-gradient(180deg,var(--leaf) 0%,#33493c 100%);
@@ -823,6 +877,11 @@ function Styles() {
         font-style:italic;color:var(--tea);font-size:14px;line-height:1.5;
         margin:0 0 16px;padding-bottom:14px;border-bottom:1px solid var(--line);
       }
+      .understood{
+        font-style:italic;color:#8a8272;font-size:13.5px;line-height:1.5;
+        text-align:center;margin:0 0 16px;
+      }
+      .understood em{color:var(--tea);font-style:normal}
       .conf{
         display:inline-block;font-family:'Fraunces',serif;font-size:12px;
         letter-spacing:.14em;text-transform:uppercase;color:var(--tea);
@@ -853,6 +912,17 @@ function Styles() {
         animation:grow .8s cubic-bezier(.2,.7,.2,1) both}
       @keyframes grow{from{width:0 !important}}
       .basis{font-style:italic;color:#5a5346;font-size:14.5px;margin:10px 0 0;line-height:1.5}
+
+      .factors{margin:18px 0 0;padding-top:14px;border-top:1px solid var(--line)}
+      .factorsLabel{
+        font-family:'Fraunces',serif;font-size:11px;letter-spacing:.18em;text-transform:uppercase;
+        color:#8a8272;margin-bottom:10px;
+      }
+      .factorRow{display:flex;align-items:baseline;gap:8px;margin-bottom:7px;font-size:14px;line-height:1.4;color:var(--ink2)}
+      .factorRow:last-child{margin-bottom:0}
+      .factorDir{font-size:11px;flex:0 0 auto;line-height:1.5}
+      .factorDir-up{color:var(--leaf-soft)}
+      .factorDir-down{color:var(--tea)}
 
       .mirror{margin:20px 0 6px;padding:16px 16px 14px;background:rgba(63,92,74,.08);
         border-left:3px solid var(--leaf);border-radius:6px}
