@@ -16,8 +16,14 @@ import { logBlocked, logSilent, logSpoken, coarseRegionFromHeaders } from "../..
 import { extractCoordinates } from "../../../lib/insightsExtract.js";
 
 export const runtime = "nodejs";
-// Web search + reasoning can take longer than a plain LLM call.
-export const maxDuration = 60;
+// The grounded reasoning step (lib/ground.js) runs an agentic Claude web
+// search — interleaved reasoning, several search rounds, and code execution —
+// which takes far longer than a plain LLM call: spoken verdicts measured
+// 135–290s end to end. At the old 60s ceiling those answers were killed
+// mid-call and surfaced as "the oracle went quiet unexpectedly". 300s (the
+// Vercel Fluid Compute / Pro maximum) gives the grounded call room to finish.
+// Requires a plan that allows it — on Hobby this is capped back to 60s.
+export const maxDuration = 300;
 
 // Curated, pre-vetted reference data by topic. When the Gate routes a question
 // to one of these, the data is injected into the grounded step as trusted
