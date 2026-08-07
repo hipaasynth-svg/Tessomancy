@@ -1,6 +1,7 @@
 import { waitUntil } from "@vercel/functions";
 import { runGate } from "../../../lib/gate.js";
 import { runGroundedReason } from "../../../lib/ground.js";
+import { runDeepDive } from "../../../lib/deepDive.js";
 import { runRender } from "../../../lib/render.js";
 import relationships from "../../../data/relationships.json";
 import {
@@ -11,7 +12,7 @@ import {
   publicTiers,
   getFreeTasteResetsInDays,
 } from "../../../lib/access.js";
-import { HARD_CAP_MESSAGE } from "../../../lib/tiers.js";
+import { HARD_CAP_MESSAGE, DEEP_READING_UNITS } from "../../../lib/tiers.js";
 import { logBlocked, logSilent, logSpoken, coarseRegionFromHeaders } from "../../../lib/insightsLog.js";
 import { extractCoordinates } from "../../../lib/insightsExtract.js";
 
@@ -46,7 +47,8 @@ const WALL_RESPONSES = {
 
 export async function POST(req) {
   try {
-    const { question } = await req.json();
+    const { question, deep: deepRaw } = await req.json();
+    const deep = deepRaw === true;
 
     if (!question || question.trim().length < 3) {
       return json({ status: "error", message: "Ask a real question." }, 400);
@@ -58,17 +60,22 @@ export async function POST(req) {
     const region = coarseRegionFromHeaders(req.headers);
 
     // 0) ACCESS — balance/subscription check, BEFORE the Gate fires. Protects
-    // margin: an unpayable request never reaches the LLM pipeline below.
+    // margin: an unpayable request never reaches the LLM pipeline below. A Deep
+    // Reading costs DEEP_READING_UNITS credits and is paid-only (never the free
+    // taste), so it consumes more and refuses to draw on the weekly reading.
     const deviceToken = getOrCreateDeviceToken();
     const customerId = getCustomerId();
-    const access = await checkAndConsumeAccess({ deviceToken, customerId });
+    const units = deep ? DEEP_READING_UNITS : 1;
+    const access = await checkAndConsumeAccess({ deviceToken, customerId, units, requirePaid: deep });
 
     if (!access.allowed) {
       if (access.hardCapped) {
         return json({ status: "rested", message: HARD_CAP_MESSAGE });
       }
       const freeTasteResetsInDays = await getFreeTasteResetsInDays(deviceToken);
-      return json({ status: "paywall", tiers: publicTiers(), freeTasteResetsInDays });
+      // `deep` lets the paywall card explain that a Deep Reading needs a pack /
+      // subscription, rather than just "your free reading is spent".
+      return json({ status: "paywall", deep, deepReadingCost: DEEP_READING_UNITS, tiers: publicTiers(), freeTasteResetsInDays });
     }
 
     // 1) THE GATE — cheap, first, always. Enforces walls + speak/silent, and
@@ -105,7 +112,9 @@ export async function POST(req) {
     // grounded in real sources, or stays silent if it can't find any. Odds
     // about the field only — never advice, never about the individual.
     const referenceData = CURATED[domain] || null;
-    const grounded = await runGroundedReason(question, referenceData, gate.reframedQuestion);
+    const grounded = deep
+      ? await runDeepDive(question, referenceData, gate.reframedQuestion)
+      : await runGroundedReason(question, referenceData, gate.reframedQuestion);
 
     if (!grounded.speak) {
       // Surface WHY in the server logs — silence caused by an API error or a
@@ -144,12 +153,23 @@ export async function POST(req) {
 
     return json({
       status: "spoken",
+      deep,
       understoodQuestion: gate.reframedQuestion || question,
       headline: face.headline,
       outcomes: grounded.outcomes,
       confidence: grounded.confidence,
       basis: grounded.basis,
       factors: grounded.factors || [],
+      // Deep Reading only — the extra synthesis layers. Absent/empty on a
+      // standard reading, so the client can render them conditionally.
+      ...(deep
+        ? {
+            baseline: grounded.baseline || "",
+            riskVariables: grounded.riskVariables || [],
+            sensitivities: grounded.sensitivities || [],
+            cohorts: grounded.cohorts || [],
+          }
+        : {}),
       mirror: face.mirror,
       disclaimer: DISCLAIMER,
       softCapNotice: access.softCapNotice || null,

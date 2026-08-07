@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from "react";
 export default function Home() {
   const [question, setQuestion] = useState("");
   const [state, setState] = useState("idle"); // idle | asking | done
+  const [askingDeep, setAskingDeep] = useState(false);
   const [result, setResult] = useState(null);
   const [billing, setBilling] = useState(null);
   const [purchaseNotice, setPurchaseNotice] = useState(null);
@@ -78,8 +79,9 @@ export default function Home() {
     setFeedLoading(false);
   }
 
-  async function ask() {
+  async function ask(deep = false) {
     if (question.trim().length < 3 || state === "asking") return;
+    setAskingDeep(deep);
     setState("asking");
     setResult(null);
     const start = Date.now();
@@ -87,7 +89,7 @@ export default function Home() {
       const res = await fetch("/api/verdict", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ question }),
+        body: JSON.stringify({ question, deep }),
       });
       const data = await res.json();
       const elapsed = Date.now() - start;
@@ -189,6 +191,7 @@ export default function Home() {
           question={question}
           setQuestion={setQuestion}
           state={state}
+          askingDeep={askingDeep}
           onAsk={ask}
           billing={billing}
           onManage={openPortal}
@@ -261,8 +264,11 @@ export default function Home() {
 // the circle's contents to the reading animation and hides the input. This
 // replaces two previously independent pieces (a plain textarea section and
 // a separately-mounted loading circle) with a single agent-like presence.
-function OracleOrb({ question, setQuestion, state, onAsk, billing, onManage, onRedeem }) {
+function OracleOrb({ question, setQuestion, state, askingDeep, onAsk, billing, onManage, onRedeem }) {
   const asking = state === "asking";
+  const canAsk = question.trim().length >= 3;
+  const deepReady = Boolean(billing?.deepAvailable);
+  const deepCost = billing?.deepReadingCost || 2;
   return (
     <section className="orbstage" aria-live="polite">
       {!asking && (
@@ -295,7 +301,9 @@ function OracleOrb({ question, setQuestion, state, onAsk, billing, onManage, onR
         </div>
 
         {asking ? (
-          <p className="gazetext">reading the leaves…</p>
+          <p className="gazetext">
+            {askingDeep ? "reading deeply — this takes a moment…" : "reading the leaves…"}
+          </p>
         ) : (
           <>
             <textarea
@@ -305,8 +313,23 @@ function OracleOrb({ question, setQuestion, state, onAsk, billing, onManage, onR
               value={question}
               onChange={(e) => setQuestion(e.target.value)}
             />
-            <button className="cast" onClick={onAsk} disabled={question.trim().length < 3}>
+            <button className="cast" onClick={() => onAsk(false)} disabled={!canAsk}>
               enlighten me
+            </button>
+            <button
+              className="castdeep"
+              onClick={() => onAsk(true)}
+              disabled={!canAsk}
+              title={
+                deepReady
+                  ? `A deeper, multi-factor reading — baseline, the variables that move the odds, and comparable cohorts. Costs ${deepCost} credits.`
+                  : `A deeper, multi-factor reading. Comes with a pack or subscription — costs ${deepCost} credits.`
+              }
+            >
+              <span className="castdeepmain">deep reading</span>
+              <span className="castdeepmeta">
+                {deepReady ? `${deepCost} credits · richer synthesis` : `${deepCost} credits · with a pack`}
+              </span>
             </button>
           </>
         )}
@@ -565,7 +588,12 @@ function Verdict({ result, onAgain, tiers, checkoutBusy, onSelectTier, onRedeem 
   if (result.status === "spoken") {
     const topOutcome = topOutcomeOf(result.outcomes);
     return (
-      <section className="card spoken">
+      <section className={`card spoken${result.deep ? " deep" : ""}`}>
+        {result.deep && (
+          <div className="deepbadge reveal" style={{ animationDelay: "0ms" }}>
+            deep reading
+          </div>
+        )}
         {result.softCapNotice && (
           <p className="softcap reveal" style={{ animationDelay: "0ms" }}>{result.softCapNotice}</p>
         )}
@@ -623,6 +651,12 @@ function Verdict({ result, onAgain, tiers, checkoutBusy, onSelectTier, onRedeem 
               </div>
             ))}
           </div>
+        )}
+        {result.deep && (
+          <DeepSynthesis
+            result={result}
+            baseDelay={420 + result.outcomes.length * 100 + 220}
+          />
         )}
         {result.basis && (
           <p
@@ -691,7 +725,11 @@ function Verdict({ result, onAgain, tiers, checkoutBusy, onSelectTier, onRedeem 
   if (result.status === "paywall") {
     return (
       <section className="card wall">
-        <p className="walltext">Your free weekly reading is spent.</p>
+        <p className="walltext">
+          {result.deep
+            ? `A Deep Reading is a paid upgrade — ${result.deepReadingCost || 2} credits from a pack or subscription. Choose one to unlock it.`
+            : "Your free weekly reading is spent."}
+        </p>
         <Pricing
           tiers={result.tiers || tiers}
           busy={checkoutBusy}
@@ -708,6 +746,93 @@ function Verdict({ result, onAgain, tiers, checkoutBusy, onSelectTier, onRedeem 
       <p className="silenttext">{result.message || "The oracle went quiet."}</p>
       <button className="again" onClick={onAgain}>try again</button>
     </section>
+  );
+}
+
+// The Deep Reading's extra synthesis layers, rendered only on a deep verdict:
+// the raw field baseline, the variables that move the odds, how the odds shift
+// as those variables change, and comparable real cohorts. Each section is
+// independent — any may be absent if the grounded step didn't surface it.
+function DeepSynthesis({ result, baseDelay = 0 }) {
+  const { baseline, riskVariables, sensitivities, cohorts } = result;
+  const hasRisk = Array.isArray(riskVariables) && riskVariables.length > 0;
+  const hasSens = Array.isArray(sensitivities) && sensitivities.length > 0;
+  const hasCohorts = Array.isArray(cohorts) && cohorts.length > 0;
+  if (!baseline && !hasRisk && !hasSens && !hasCohorts) return null;
+
+  let d = baseDelay;
+  const step = () => (d += 90);
+
+  return (
+    <div className="deepwrap">
+      {baseline && (
+        <div className="deepsection reveal" style={{ animationDelay: `${step()}ms` }}>
+          <div className="deephead">the baseline</div>
+          <p className="baselinetext">{baseline}</p>
+        </div>
+      )}
+
+      {hasRisk && (
+        <div className="deepsection reveal" style={{ animationDelay: `${step()}ms` }}>
+          <div className="deephead">what moves the odds</div>
+          {riskVariables.map((v, i) => (
+            <div className="riskrow" key={i}>
+              <span className={`factorDir factorDir-${v.effect}`} aria-hidden="true">
+                {v.effect === "up" ? "▲" : "▼"}
+              </span>
+              <span className="riskbody">
+                <span className="risklabel">{v.label}</span>
+                <span className={`riskmag riskmag-${v.magnitude}`}>{v.magnitude}</span>
+                {v.note ? <span className="risknote"> — {v.note}</span> : null}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {hasSens && (
+        <div className="deepsection reveal" style={{ animationDelay: `${step()}ms` }}>
+          <div className="deephead">how it shifts</div>
+          {sensitivities.map((s, i) => (
+            <div className="sensrow" key={i}>
+              <div className="sensvar">{s.variable}</div>
+              {s.ifBetter && (
+                <div className="sensline">
+                  <span className="senstag senstag-up">if it improves</span> {s.ifBetter}
+                </div>
+              )}
+              {s.ifWorse && (
+                <div className="sensline">
+                  <span className="senstag senstag-down">if it worsens</span> {s.ifWorse}
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {hasCohorts && (
+        <div className="deepsection reveal" style={{ animationDelay: `${step()}ms` }}>
+          <div className="deephead">comparable fields</div>
+          {cohorts.map((c, i) => (
+            <div className="cohortrow" key={i}>
+              <div className="cohorttop">
+                <span className="cohortname">{c.cohort}</span>
+                {typeof c.probability === "number" && (
+                  <span className="cohortpct">{c.probability}%</span>
+                )}
+              </div>
+              {typeof c.probability === "number" && (
+                <div className="track cohorttrack">
+                  <div className="fill" style={{ width: `${c.probability}%` }} />
+                </div>
+              )}
+              {c.note ? <div className="cohortnote">{c.note}</div> : null}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -809,6 +934,22 @@ function Styles() {
       }
       .cast:disabled{opacity:.5;cursor:default}
       .cast:not(:disabled):active{transform:translateY(1px)}
+
+      .castdeep{
+        width:100%;margin-top:9px;padding:11px 16px;border:1px solid var(--gold);
+        border-radius:12px;background:rgba(176,138,79,.06);cursor:pointer;
+        display:flex;flex-direction:column;align-items:center;gap:2px;
+        transition:transform .12s ease, opacity .2s ease, background .2s ease;
+      }
+      .castdeep:not(:disabled):hover{background:rgba(176,138,79,.12)}
+      .castdeep:disabled{opacity:.5;cursor:default}
+      .castdeep:not(:disabled):active{transform:translateY(1px)}
+      .castdeepmain{
+        color:var(--gold);font-family:'Fraunces',serif;font-weight:600;
+        font-size:14.5px;letter-spacing:.14em;text-transform:lowercase;
+      }
+      .castdeepmeta{color:#7c8394;font-family:'Newsreader',serif;font-size:11.5px;letter-spacing:.02em}
+
       .fineprint{text-align:center;color:#7c8394;font-size:13px;margin-top:14px;letter-spacing:.01em}
 
       .promolink{
@@ -923,6 +1064,53 @@ function Styles() {
       .factorDir{font-size:11px;flex:0 0 auto;line-height:1.5}
       .factorDir-up{color:var(--leaf-soft)}
       .factorDir-down{color:var(--tea)}
+
+      /* ---- Deep Reading ---- */
+      .deepbadge{
+        display:inline-block;align-self:flex-start;margin-bottom:12px;
+        padding:4px 11px;border:1px solid var(--gold);border-radius:99px;
+        color:var(--gold);background:rgba(176,138,79,.07);
+        font-family:'Fraunces',serif;font-size:11px;font-weight:600;
+        letter-spacing:.18em;text-transform:uppercase;
+      }
+      .spoken.deep{border-color:rgba(176,138,79,.4)}
+      .deepwrap{margin:18px 0 0;display:flex;flex-direction:column;gap:16px}
+      .deepsection{padding-top:14px;border-top:1px solid var(--line)}
+      .deephead{
+        font-family:'Fraunces',serif;font-size:12px;font-weight:600;
+        letter-spacing:.16em;text-transform:uppercase;color:var(--gold);margin-bottom:9px;
+      }
+      .baselinetext{margin:0;color:var(--ink2);font-size:14.5px;line-height:1.55}
+      .riskrow{display:flex;align-items:baseline;gap:8px;margin-bottom:8px;font-size:14px;line-height:1.45;color:var(--ink2)}
+      .riskrow:last-child{margin-bottom:0}
+      .riskbody{flex:1 1 auto}
+      .risklabel{color:var(--ink)}
+      .riskmag{
+        margin-left:7px;padding:1px 7px;border-radius:99px;font-size:10.5px;
+        letter-spacing:.06em;text-transform:uppercase;font-family:'Fraunces',serif;
+        background:rgba(20,24,33,.05);color:#6a6353;vertical-align:middle;
+      }
+      .riskmag-large{background:rgba(176,138,79,.16);color:var(--tea)}
+      .riskmag-moderate{background:rgba(176,138,79,.09);color:#8a6d3f}
+      .risknote{color:#6a6353}
+      .sensrow{margin-bottom:11px}
+      .sensrow:last-child{margin-bottom:0}
+      .sensvar{font-family:'Fraunces',serif;font-size:14px;color:var(--ink);margin-bottom:3px}
+      .sensline{font-size:13.5px;color:var(--ink2);line-height:1.5;margin-bottom:2px}
+      .senstag{
+        display:inline-block;margin-right:6px;padding:0 7px;border-radius:99px;
+        font-size:10.5px;letter-spacing:.05em;text-transform:uppercase;
+        font-family:'Fraunces',serif;
+      }
+      .senstag-up{background:rgba(109,138,118,.16);color:var(--leaf)}
+      .senstag-down{background:rgba(122,90,58,.14);color:var(--tea)}
+      .cohortrow{margin-bottom:12px}
+      .cohortrow:last-child{margin-bottom:0}
+      .cohorttop{display:flex;justify-content:space-between;align-items:baseline;gap:10px;margin-bottom:5px}
+      .cohortname{font-size:14px;color:var(--ink2);line-height:1.35}
+      .cohortpct{font-family:'Fraunces',serif;font-weight:600;color:var(--leaf);font-size:14px;flex:0 0 auto}
+      .cohorttrack{margin:0}
+      .cohortnote{margin-top:4px;font-size:12.5px;font-style:italic;color:#6a6353;line-height:1.45}
 
       .mirror{margin:20px 0 6px;padding:16px 16px 14px;background:rgba(63,92,74,.08);
         border-left:3px solid var(--leaf);border-radius:6px}
