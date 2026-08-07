@@ -4,8 +4,10 @@ import { stripe } from "../../../lib/stripe.js";
 import { isValidAdminToken } from "../../../lib/apiKeys.js";
 
 export const runtime = "nodejs";
-// A real web-search round-trip can take a few seconds; give it headroom.
-export const maxDuration = 60;
+// The search check makes a real (if minimal) Claude web-search call, which can
+// take a while; match the verdict route's ceiling so a slow-but-healthy
+// dependency reads as pass, not timeout. Requires a plan that allows it.
+export const maxDuration = 300;
 
 // Live-dependency health check. This route makes ONE real call through every
 // external dependency the answer pipeline (app/api/verdict/route.js) depends
